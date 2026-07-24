@@ -11,7 +11,8 @@ SAM3 / SAM3.1 마스크 + 인페인트 확장. 다섯 가지 워크플로 제공
 ControlNet 통합 (LLLite 인페인트 모델 자동 호환 처리), 옷 교체용 Target/Replacement 워크플로, 시드 고정, VRAM 절약 옵션, XYZ plot 다축 등 지원.
 
 또한 SAM3와 **완전히 분리된 독립 기능**으로 **Anima Guidance Suite**(v0.11.0+, PAG/SEG/SLG ·
-APG/CWM/SMC · Skimmed CFG · DCW · DAVE · CNS · Adaptive Guidance · Detail Daemon)를 제공합니다.
+APG/CWM/SMC · Skimmed CFG · DCW · DAVE · CNS · **보조 CLIP-L Modulation Guidance** ·
+Adaptive Guidance · Detail Daemon)를 제공합니다.
 기능마다 구현 방식과 검증 수준이 다르므로, 사용 전에 반드시 아래 **[구현·검증 상태](#구현검증-상태)**와
 **[상세 가이드](docs/GUIDANCE.md)**를 확인하세요.
 
@@ -418,6 +419,8 @@ SAM3 처리와 분리된 opt-in 기능 모음입니다. Forge Neo 코어 파일�
 > `SelfCrossAttention.torch_attention_op`에 도달하고 non-zero weak delta를 만드는 것을 확인했습니다.
 > CWM+DCW+DAVE+CNS 최소 활성 조합도 실제 Euler a 생성에서 실행 경로를 확인했습니다.
 > 이는 **동작 검증**이며 모든 설정에서 화질 향상을 보장하는 벤치마크는 아닙니다.
+> 2026-07-24 Modulation Guidance는 실제 권장 CLIP-L과 공식 어댑터 로드·투영 및
+> Forge block 주입까지 검증했으며, 실제 checkpoint 이미지 A/B는 아직 별도 확인이 필요합니다.
 
 ### 구현·검증 상태
 
@@ -431,13 +434,21 @@ SAM3 처리와 분리된 opt-in 기능 모음입니다. Forge Neo 코어 파일�
 | **DCW** | live x_t와 x0의 wavelet 차이를 post-CFG 마지막에 보정 | 4D/5D·홀수 해상도·중립값 검증, 실제 실행 확인 |
 | **DAVE** | Anima block 출력의 token/spatial DC 성분 감쇠 | 실제 block hit 확인, 다양성/권장 block은 추가 A/B 필요 |
 | **CNS-inspired** | 기존 seeded/Brownian noise를 live x_t 에너지로 재색칠 | Euler a noise call 확인. deterministic sampler에서는 inert |
+| **Anima Modulation Guidance** | 보조 CLIP-L 방향을 공개 어댑터로 block AdaLN에 가산 | 실제 CLIP/어댑터 로드·투영·주입 검증. 이미지 품질 A/B는 추가 필요 |
 | **Adaptive Guidance** | combined batch의 후반 uncond row 생략 | low-VRAM 분리 호출에서는 생략/속도 이득 없음 |
 | **Skimmed CFG** | 과포화를 만드는 성분만 낮은 CFG로 되돌림(anti-burn) | 상단 수식과 tensor 단위 일치 검증. **CFG>1 전용**, pre-CFG가 아닌 post-CFG 재구성 |
 | **Detail Daemon** | sigma schedule로 디테일 강도 조절 | 별도 opt-in 기능 |
 
+Modulation Guidance를 쓰려면 768차원 CLIP-L safetensors를
+`models/text_encoder/`에 둡니다(상류 예제의 권장 파일명:
+`Anzhc Noobai11 CLIP L Anime.safetensors`). CLIP 파일 자체는 자동 다운로드하지 않으며,
+공식 `yresearch/cosmos-pooled` 어댑터만 첫 활성화 때
+`models/anima_modulation_guidance/`로 자동 다운로드·무결성 검증합니다.
+
 ### 오케스트레이터 순서
 
-`ADG/PAG 배치 → DAVE → attention PAG/SEG → Skimmed CFG → CFG base(SMC → APG → CWM)
+`ADG/PAG 배치 → CLIP block modulation → DAVE → attention PAG/SEG → Skimmed CFG
+→ CFG base(SMC → APG → CWM)
 → PAG/SEG/SLG delta → DCW → CNS sampler noise`
 
 - CFG base의 **SMC·APG·CWM은 독립 토글**입니다. 셋 다 끄면 MaHiRo/custom CFG 결과를
@@ -446,7 +457,8 @@ SAM3 처리와 분리된 opt-in 기능 모음입니다. Forge Neo 코어 파일�
   오차가 크면 경고합니다.
 - Skimmed CFG는 별도 스크립트(별도 아코디언)이며 CFG base보다 **먼저** 실행되고, skim 결과를
   Forge의 예측 tensor에 다시 써서 이후 SMC/APG/CWM·PAG delta·DCW가 모두 그 위에서
-  동작합니다. ComfyUI에서 pre-CFG 노드를 물렸을 때와 같은 조합이 가능합니다.
+  동작합니다. Forge의 중복 메서드 정의로 `sorting_priority`가 실제 실행에서 무시되는 문제를
+  피하려고 callback을 목록 맨 앞에 직접 dedupe+prepend합니다.
 - `Legacy CFG base mode` 아코디언의 라디오와 `Experimental stack`은 구버전 호환용이며
   위 토글과 OR로 합쳐집니다.
 - CWM `alpha high > +0.15`는 Anima 16채널 latent에서 캐릭터 분리를 만들 수 있어 UI 경고가 뜹니다.
@@ -456,13 +468,15 @@ SAM3 처리와 분리된 opt-in 기능 모음입니다. Forge Neo 코어 파일�
   block `18`, heads 빈칸(전체), Start/End `0.0/0.7`, Rescale `0.20`,
   Rescale mode `full`이 Anima Safe PAG 시작값입니다.
 - CNS는 ancestral/SDE sampler에서만 의미가 있습니다. TeaCache는 포함하지 않습니다.
+- Modulation Guidance는 메인 Qwen을 교체하지 않고 별도 768차원 CLIP-L을 사용합니다.
+  기본 OFF이고 `w=0`에서도 base modulation은 남으므로 진짜 기준 이미지는 토글 OFF입니다.
 - PAG/SEG 자체 A/B는 `Rescale=0`, SLG/APG/ADG off로 원인을 분리하세요.
 - DCW·DAVE·CNS는 Guidance 본문에 펼쳐 표시하며, APG/Adaptive의 고급값만 접힌
   세부 영역으로 둡니다.
 
 확장 목록 아래 **Anima Reference-Latent PoC (debug / 안전)** 패널의
 `Log Guidance verification summary`를 켜면 attention hit/raw delta, CFG `w_eff`/fit,
-DCW eval, DAVE block hit, CNS noise call, Adaptive 실제 생략 여부가 출력됩니다.
+DCW eval, DAVE/Modulation block hit, CNS noise call, Adaptive 실제 생략 여부가 출력됩니다.
 
 - 구현: `scripts/anima_safe_pag.py`, `sam3ext/guidance/`, `scripts/anima_detail_daemon.py`
 - 테스트: `tests/test_anima_attention_patch.py`, `tests/test_anima_safe_pag.py`,
@@ -484,6 +498,7 @@ DCW eval, DAVE block hit, CNS noise call, Adaptive 실제 생략 여부가 출�
 | **DCW / CWM / SMC** | [namemechan/ComfyUI-DCW](https://github.com/namemechan/ComfyUI-DCW) | GPL-3.0 | 수식 기반 Forge 재작성 (vendor 아님) |
 | **DAVE** | [daheekwon/DAVE](https://github.com/daheekwon/DAVE) · [sorryhyun/ComfyUI-Anima-DAVE](https://github.com/sorryhyun/ComfyUI-Anima-DAVE) | MIT | Forge block 재구현 (vendor 아님) |
 | **CNS-inspired Wavelet Noise** | [namemechan/comfyui-cns_sampler_patch](https://github.com/namemechan/comfyui-cns_sampler_patch) | GPL-3.0 | sampler-noise 재작성 (vendor 아님) |
+| **Anima Modulation Guidance** | [Anzhc/Anima-Mod-Guidance-ComfyUI-Node](https://github.com/Anzhc/Anima-Mod-Guidance-ComfyUI-Node) · [quickjkee/modulation-guidance](https://github.com/quickjkee/modulation-guidance) · [yresearch/cosmos-pooled](https://huggingface.co/yresearch/cosmos-pooled) | MIT(코드 선언) / 자산 모델 카드 | Forge block 재작성 (vendor 아님) |
 | **Skimmed CFG** (별도 기능) | [Extraltodeus/Skimmed_CFG](https://github.com/Extraltodeus/Skimmed_CFG) | **LICENSE 파일 미공개** | 공개 수식 기반 Forge 재작성 (vendor 아님) |
 | **Detail Daemon** (별도 기능) | [muerrilla/sd-webui-detail-daemon](https://github.com/muerrilla/sd-webui-detail-daemon) | 원 저장소 라이선스 참고 | 이식/재구현 (vendor 아님) |
 | SAM3 검출 | Meta [facebook/sam3](https://huggingface.co/facebook/sam3) ([facebookresearch/sam3](https://github.com/facebookresearch/sam3)) | Meta SAM 라이선스 | `sam3` PyPI 패키지 |

@@ -33,6 +33,15 @@ class AnimaAttentionPatchTests(unittest.TestCase):
             slg_b0=None,
             slg_b1=None,
         )
+        self.pag._DAVE.update(on=False, targets=set(), steps=0)
+        self.pag._MOD.update(
+            on=False,
+            targets=set(),
+            block_modulations=None,
+            typed={},
+            hits=0,
+            warned=False,
+        )
 
     @staticmethod
     def _inputs(batch=3, seq=4, heads=2, dim=3):
@@ -109,6 +118,77 @@ class AnimaAttentionPatchTests(unittest.TestCase):
 
         self.assertTrue(torch.equal(out, baseline))
         self.assertEqual(pag._STATE["attn_hook_hits"], 0)
+
+    def test_modulation_adds_only_target_block_adaln_without_mutation(self):
+        pag = self.pag
+        captured = {}
+
+        def original(x, t, context, *, adaln_lora_B_T_3D, **kwargs):
+            captured["adaln"] = adaln_lora_B_T_3D
+            return x
+
+        wrapped = pag._make_block_wrapper(1, original)
+        x = torch.randn(2, 1, 2, 2, 4)
+        timestep = torch.randn(2, 1, 4)
+        context = torch.randn(2, 3, 4)
+        adaln = torch.randn(2, 1, 6)
+        baseline = adaln.clone()
+        block_modulations = torch.tensor(
+            [
+                [0.0] * 6,
+                [0.5, -0.5, 1.0, -1.0, 2.0, -2.0],
+            ]
+        )
+        pag._MOD.update(
+            on=True,
+            targets={1},
+            block_modulations=block_modulations,
+            typed={},
+            hits=0,
+        )
+
+        out = wrapped(
+            x,
+            timestep,
+            context,
+            adaln_lora_B_T_3D=adaln,
+        )
+
+        self.assertIs(out, x)
+        self.assertTrue(torch.equal(adaln, baseline))
+        torch.testing.assert_close(
+            captured["adaln"],
+            baseline + block_modulations[1].reshape(1, 1, -1),
+        )
+        self.assertEqual(pag._MOD["hits"], 1)
+
+    def test_modulation_non_target_block_is_identity(self):
+        pag = self.pag
+        captured = {}
+
+        def original(x, t, context, *, adaln_lora_B_T_3D, **kwargs):
+            captured["adaln"] = adaln_lora_B_T_3D
+            return x
+
+        wrapped = pag._make_block_wrapper(0, original)
+        adaln = torch.randn(1, 1, 6)
+        pag._MOD.update(
+            on=True,
+            targets={1},
+            block_modulations=torch.ones(2, 6),
+            typed={},
+            hits=0,
+        )
+
+        wrapped(
+            torch.zeros(1, 1, 1, 1, 2),
+            torch.zeros(1, 1, 2),
+            torch.zeros(1, 1, 2),
+            adaln_lora_B_T_3D=adaln,
+        )
+
+        self.assertIs(captured["adaln"], adaln)
+        self.assertEqual(pag._MOD["hits"], 0)
 
     def test_teardown_restores_all_global_patches(self):
         pag = self.pag

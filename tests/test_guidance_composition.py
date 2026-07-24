@@ -4,11 +4,12 @@ The user-facing question these lock in: can PAG/SEG, DCW, CWM, SMC and Skimmed
 CFG all be enabled in the same generation without one silently disabling
 another? They compose as:
 
-  * Skimmed CFG runs in its own post-CFG hook (sorting_priority 1) and rewrites
+  * Skimmed CFG runs in its own explicitly-prepended post-CFG hook and rewrites
     ``cond_denoised``/``uncond_denoised`` in place.
   * The Anima Safe PAG suite runs its single post-CFG orchestrator afterwards
-    (sorting_priority 2): CFG base (SMC -> APG -> CWM) -> PAG/SEG/SLG
-    perturbation -> DCW, all in denoised (x0) space.
+    despite Forge currently ignoring ``sorting_priority`` for
+    ``process_before_every_sampling``: CFG base (SMC -> APG -> CWM) ->
+    PAG/SEG/SLG perturbation -> DCW, all in denoised (x0) space.
 
 The composition therefore depends on (a) Skimmed CFG's hook running *before* the
 Safe PAG hook, and (b) each Safe PAG stage actually contributing. Both are
@@ -67,13 +68,35 @@ class GuidanceCompositionTests(unittest.TestCase):
         cls.pag = _load("anima_safe_pag.py", "_test_compose_pag")
         cls.skim = _load("anima_skimmed_cfg.py", "_test_compose_skim")
 
-    def test_skimmed_cfg_hook_runs_before_safe_pag(self):
-        # Skimmed CFG must register its post-CFG hook before Safe PAG so its
-        # in-place cond/uncond skim is visible when the suite reads them. Lower
-        # sorting_priority runs process_before_every_sampling first.
-        self.assertLess(
-            self.skim.AnimaSkimmedCFG.sorting_priority,
-            self.pag.AnimaSafePAG.sorting_priority,
+    def test_skimmed_registration_forces_real_hook_order(self):
+        """Reproduce Forge's actual alphabetic registration order.
+
+        Safe PAG appends first because anima_safe_pag.py loads before
+        anima_skimmed_cfg.py. Skimmed must then prepend itself; comparing the
+        two sorting_priority integers would miss Forge's duplicate runner
+        method and is not an execution-order test.
+        """
+
+        class DummyUnet:
+            def __init__(self):
+                self.model_options = {}
+
+            def set_model_sampler_post_cfg_function(self, function):
+                current = self.model_options.get(
+                    "sampler_post_cfg_function", []
+                )
+                self.model_options["sampler_post_cfg_function"] = [
+                    *current,
+                    function,
+                ]
+
+        unet = DummyUnet()
+        unet.set_model_sampler_post_cfg_function(self.pag._post_cfg)
+        self.skim._prepend_post_cfg_function(unet)
+
+        self.assertEqual(
+            unet.model_options["sampler_post_cfg_function"],
+            [self.skim._post_cfg, self.pag._post_cfg],
         )
 
     def _base_args(self) -> dict:
@@ -157,6 +180,67 @@ class GuidanceCompositionTests(unittest.TestCase):
             torch.allclose(both, smc_only),
             "CWM contribution lost when combined with SMC",
         )
+
+    def _run_skim_pag_chain(self, order, attn_scale):
+        torch.manual_seed(20260724)
+        cond_original = torch.randn(1, 4, 8, 8)
+        uncond_original = torch.randn(1, 4, 8, 8)
+        live_input = torch.randn(1, 4, 8, 8)
+        weak = cond_original * 0.85 + 0.05
+        cond = cond_original.clone()
+        uncond = uncond_original.clone()
+        result = uncond + 7.0 * (cond - uncond)
+
+        self.skim._SKIM.update(
+            on=True,
+            start=0.0,
+            end=1.0,
+            skimming_cfg=3.0,
+            full_skim_negative=False,
+            disable_flipping_filter=False,
+            flip_at=0.0,
+            warned=True,
+            steps=0,
+        )
+        self._configure(cwm=False, smc=False, pert=True, dcw=False)
+        self.pag._STATE.update(
+            cond_raw=cond_original.clone(),
+            attn_raw=weak.clone(),
+            attn_scale=float(attn_scale),
+            slg_raw=None,
+        )
+
+        for function in order:
+            result = function(
+                {
+                    "denoised": result,
+                    "cond_denoised": cond,
+                    "uncond_denoised": uncond,
+                    "input": live_input,
+                    "sigma": torch.tensor([1.0]),
+                    "cond_scale": 7.0,
+                    "model_options": {},
+                }
+            )
+        return result
+
+    def test_prepend_restores_pag_scale_response_with_skimmed_enabled(self):
+        fixed_order = [self.skim._post_cfg, self.pag._post_cfg]
+        scale_zero = self._run_skim_pag_chain(fixed_order, 0.0)
+        scale_eight = self._run_skim_pag_chain(fixed_order, 8.0)
+
+        self.assertFalse(torch.equal(scale_zero, scale_eight))
+        self.assertGreater(
+            float(torch.sqrt(torch.mean((scale_eight - scale_zero) ** 2))),
+            1e-6,
+        )
+
+    def test_old_append_order_erases_pag_scale_response(self):
+        old_order = [self.pag._post_cfg, self.skim._post_cfg]
+        scale_zero = self._run_skim_pag_chain(old_order, 0.0)
+        scale_eight = self._run_skim_pag_chain(old_order, 8.0)
+
+        self.assertTrue(torch.equal(scale_zero, scale_eight))
 
 
 if __name__ == "__main__":

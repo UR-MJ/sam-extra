@@ -3,6 +3,37 @@
 버전 태그는 GitHub Releases에도 발행됩니다. 아래는 요약이며, guidance/속도 기능의
 상세는 [docs/GUIDANCE.md](docs/GUIDANCE.md)를 참고하세요.
 
+## v0.20.0 — Skimmed/PAG 순서 복구 + Anima CLIP Modulation
+
+- **Skimmed CFG가 PAG 계열을 지우던 실제 원인 수정**: Forge Neo의
+  `ScriptRunner.process_before_every_sampling`이 두 번 정의돼 마지막 비정렬 구현이
+  `sorting_priority`를 무시하는 문제를 확장 내부에서 우회. Skimmed post-CFG callback을
+  owner tag로 dedupe한 뒤 목록 맨 앞에 prepend해 실제 순서를 항상
+  `Skimmed → Safe PAG`로 고정했습니다. Forge 코어 파일은 수정하지 않습니다.
+- **PAG scale 회귀 검증 강화**: 종전 `PAG → Skimmed` 순서는 scale 0/8 출력이 bitwise
+  동일해지는 반면, 수정된 `Skimmed → PAG` 순서는 non-zero RMS 차이가 생기는 것을 실제
+  post-CFG 체인 테스트로 고정. v0.19.1의 `cond_raw` 격리도 유지해 skim된 cond 오염을
+  다시 막습니다.
+- **Anima Modulation Guidance 추가**: 별도 768차원 CLIP-L의
+  `base + w × (positive − negative)` 방향을 공개 Cosmos 어댑터 MLP/scales로 투영해
+  선택한 Forge Anima block의 `adaln_lora_B_T_3D`에 가산합니다. 메인 Qwen conditioning은
+  교체하지 않으며 기본 OFF입니다.
+- **CLIP/어댑터 자산 경로**: `models/text_encoder`의 safetensors 헤더를 검사해 실제
+  CLIP-L만 드롭다운에 표시하고 Anzhc Anime encoder를 우선합니다. 공식
+  `yresearch/cosmos-pooled/checkpoint_4000.pt`는 첫 사용 시
+  `models/anima_modulation_guidance/`로 내려받아 크기와 SHA-256을 검증합니다.
+  local adapter는 `weights_only=True`로 필요한 tensor만 읽습니다.
+- **Forge 전용 호환 계층**: ComfyUI Cosmos와 달리 Forge `Anima`에는
+  `model_channels` 속성이 없으므로 실제 `Block.x_dim`에서 2048 폭을 추론합니다.
+  CLIP/adapter 투영은 generation당 CPU에서 한 번만 수행하고 sampler 중에는 작은
+  per-block vector만 model device/dtype으로 캐시합니다.
+- **UI/XYZ/기록**: CLIP 모델, direction weight, block 범위, base/positive/negative prompt,
+  adapter source를 UI에 추가하고 `[Anima Mod] Enable/Weight/Start/End` XYZ 축,
+  PNG infotext와 opt-in verification block-hit 로그를 연결했습니다.
+- **검증**: 회귀 테스트 **103개** 통과, Gradio 4.40에서 script argument 56개 UI 생성 확인.
+  실제 로컬 권장 CLIP-L + 공식 어댑터로 `(28, 6144)` finite modulation 투영까지 확인했습니다.
+  실제 checkpoint 이미지 품질 A/B는 아직 별도 검증 범위입니다.
+
 ## v0.19.1 — PAG cond 오염 수정 + Skimmed CFG XYZ
 
 - **PAG/SEG 보정항 오염 수정**: `_apply_perturbation`이 weak 예측을 만들 때 사용한 원본

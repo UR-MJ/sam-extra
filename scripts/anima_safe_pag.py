@@ -61,11 +61,13 @@ from __future__ import annotations
 
 import math
 import importlib
+import re
 import sys
 import time
 import traceback
 import weakref
 from functools import partial
+from pathlib import Path
 
 import gradio as gr
 
@@ -82,6 +84,11 @@ from sam3ext.guidance.cwm_smc import (
 )
 from sam3ext.guidance.dave import apply_dave
 from sam3ext.guidance.dcw import apply_dcw
+from sam3ext.guidance.modulation import (
+    clear_modulation_caches,
+    list_clip_l_models,
+    prepare_block_modulations,
+)
 from sam3ext.guidance.runtime import GuidanceRuntime
 try:
     from guidance_diagnostics import guidance_diagnostics_enabled
@@ -167,9 +174,12 @@ _STATE: dict = {
     "requested_adg": False,
     "requested_cfg_mode": "preserve",
     "requested_cfg_stack": False,
+    "requested_smc": False,
+    "requested_cwm": False,
     "requested_dcw": False,
     "requested_dave": False,
     "requested_cns": False,
+    "requested_modulation": False,
     "requested_method": None,
     "engine": "?",
     "diag_started_at": None,
@@ -184,6 +194,7 @@ _EXTRA_GENERATION_PARAM_KEYS = (
     "Anima DCW",
     "Anima DAVE",
     "Anima CNS Wavelet Noise",
+    "Anima Modulation Guidance",
 )
 
 
@@ -270,6 +281,25 @@ _CNS: dict = {
     "gamma_power": 0.5,
     "gamma_scale": 3.0,
     "warned": False,
+}
+
+_MOD: dict = {
+    "on": False,
+    "weight": 3.0,
+    "targets": set(),
+    # CPU float32 [blocks, 3*model_channels]. Only selected rows are copied to
+    # the active model device and cached as tiny per-block vectors.
+    "block_modulations": None,
+    "typed": {},
+    "hits": 0,
+    "warned": False,
+    "clip_model": "",
+    "adapter_path": "",
+    "start_layer": 0,
+    "end_layer": -1,
+    "base_prompt": "",
+    "positive_prompt": "",
+    "negative_prompt": "",
 }
 
 _RUNTIME = GuidanceRuntime(
@@ -529,13 +559,82 @@ def _make_selfattn_wrapper(idx: int, orig_forward):
     return _wrapped
 
 
+def _modulate_block_call(idx: int, args, kwargs):
+    """Add the precomputed CLIP modulation to this block's AdaLN tensor.
+
+    Forge passes ``adaln_lora_B_T_3D`` as a keyword today, while compatible
+    Comfy-derived forks may pass it as positional argument 4. Return copied
+    call containers so the shared base tensor remains untouched for the final
+    layer and non-target blocks.
+    """
+    if not _MOD["on"] or idx not in _MOD["targets"] or torch is None:
+        return args, kwargs
+
+    positional = len(args) > 3
+    adaln = (
+        args[3]
+        if positional
+        else kwargs.get("adaln_lora_B_T_3D")
+    )
+    block_modulations = _MOD.get("block_modulations")
+    if (
+        not torch.is_tensor(adaln)
+        or not torch.is_tensor(block_modulations)
+        or idx >= block_modulations.shape[0]
+    ):
+        if not _MOD["warned"]:
+            _MOD["warned"] = True
+            _log(
+                "CLIP modulation could not find a compatible "
+                "adaln_lora_B_T_3D tensor; feature is inert."
+            )
+        return args, kwargs
+
+    try:
+        cache_key = (idx, str(adaln.device), str(adaln.dtype))
+        delta = _MOD["typed"].get(cache_key)
+        if delta is None:
+            delta = block_modulations[idx].to(
+                device=adaln.device,
+                dtype=adaln.dtype,
+            )
+            _MOD["typed"][cache_key] = delta
+        if delta.shape[-1] != adaln.shape[-1]:
+            raise RuntimeError(
+                f"AdaLN width mismatch: delta={delta.shape[-1]}, "
+                f"model={adaln.shape[-1]}"
+            )
+        while delta.ndim < adaln.ndim:
+            delta = delta.unsqueeze(0)
+        modulated = adaln + delta
+
+        if positional:
+            changed = list(args)
+            changed[3] = modulated
+            call_args, call_kwargs = tuple(changed), kwargs
+        else:
+            changed = dict(kwargs)
+            changed["adaln_lora_B_T_3D"] = modulated
+            call_args, call_kwargs = args, changed
+
+        _MOD["hits"] += 1
+        return call_args, call_kwargs
+    except Exception as exc:
+        if not _MOD["warned"]:
+            _MOD["warned"] = True
+            _log(
+                "CLIP modulation block injection fallback: "
+                f"{type(exc).__name__}: {exc}"
+            )
+        return args, kwargs
+
+
 def _make_block_wrapper(idx: int, orig_forward):
-    """Wrap a whole ``block.forward`` for SLG: for the layer-skipped rows
-    ``[slg_b0:slg_b1]`` make the block a no-op (output = input), i.e. skip its
-    contribution → a weak "implicit model" prediction."""
+    """Compose CLIP modulation, original block, DAVE, then SLG restoration."""
 
     def _wrapped(*args, **kwargs):
         x_in = args[0] if args else kwargs.get("x_B_T_H_W_D", kwargs.get("x"))
+        call_args, call_kwargs = _modulate_block_call(idx, args, kwargs)
         previous_spatial = _STATE.get("attn_spatial_shape")
         captures_spatial = (
             _STATE["any_b0"] is not None
@@ -546,7 +645,7 @@ def _make_block_wrapper(idx: int, orig_forward):
         if captures_spatial:
             _STATE["attn_spatial_shape"] = tuple(int(v) for v in x_in.shape[1:4])
         try:
-            out = orig_forward(*args, **kwargs)
+            out = orig_forward(*call_args, **call_kwargs)
         finally:
             if captures_spatial:
                 _STATE["attn_spatial_shape"] = previous_spatial
@@ -907,6 +1006,10 @@ def _teardown_global_patches() -> None:
             except Exception:
                 pass
     _PATCHED_CNS_TARGETS.clear()
+    try:
+        clear_modulation_caches()
+    except Exception:
+        pass
 
 
 try:
@@ -1557,6 +1660,40 @@ def _get_diffusion_model(unet):
     return None
 
 
+_EXTRA_NETWORK_TAG = re.compile(
+    r"<(?:lora|lyco|hypernet|embedding):[^>]+>",
+    flags=re.IGNORECASE,
+)
+
+
+def _forge_and_models_roots() -> tuple[Path, Path]:
+    from modules import paths
+
+    return Path(paths.script_path), Path(paths.models_path)
+
+
+def _clip_model_choices() -> list[str]:
+    try:
+        _, models_root = _forge_and_models_roots()
+        return list_clip_l_models(models_root)
+    except Exception:
+        return []
+
+
+def _first_processing_prompt(p, *, negative: bool = False) -> str:
+    """Get the first fully-expanded WebUI prompt and remove extra-network tags."""
+    plural = "all_negative_prompts" if negative else "all_prompts"
+    singular = "negative_prompt" if negative else "prompt"
+    value = getattr(p, plural, None)
+    if isinstance(value, (list, tuple)) and value:
+        value = value[0]
+    elif not isinstance(value, str):
+        value = getattr(p, singular, "")
+        if isinstance(value, (list, tuple)):
+            value = value[0] if value else ""
+    return _EXTRA_NETWORK_TAG.sub("", str(value or "")).strip()
+
+
 # ---------------------------------------------------------------------------
 # XYZ plot integration — lets users grid an ON/OFF (and param) comparison.
 # The AxisOption apply functions mutate ``p`` per grid cell; the script's
@@ -1730,6 +1867,22 @@ def _make_pag_xyz_axis() -> None:
             "[Anima CNS] Gamma Scale", float,
             partial(_pag_xyz_set, field="cns_gamma_scale"),
         ),
+        xyz_grid.AxisOption(
+            "[Anima Mod] Enable", str,
+            partial(_pag_xyz_set, field="mod_enabled"), choices=bool_choices,
+        ),
+        xyz_grid.AxisOption(
+            "[Anima Mod] Direction Weight", float,
+            partial(_pag_xyz_set, field="mod_weight"),
+        ),
+        xyz_grid.AxisOption(
+            "[Anima Mod] Start Block", float,
+            partial(_pag_xyz_set, field="mod_start_layer"),
+        ),
+        xyz_grid.AxisOption(
+            "[Anima Mod] End Block", float,
+            partial(_pag_xyz_set, field="mod_end_layer"),
+        ),
     ]
 
     # Register per label so a WebUI "reload scripts" after an extension update
@@ -1789,12 +1942,12 @@ def _clear_extra_generation_params(p) -> None:
 
 
 class AnimaSafePAG(scripts.Script):
-    # sorting_priority governs BOTH the accordion position and the
-    # process order (lower = higher up / earlier). This panel sits in the SAM3
-    # extension block under Detail Daemon (-29) and Skimmed CFG (-28); running
-    # after Skimmed CFG also means its post-CFG hook receives the skimmed
-    # result as "incoming". We still clone from the CURRENT
-    # forge_objects.unet, so other unet-patching scripts compose regardless.
+    # sorting_priority still governs the accordion position. Current Forge Neo
+    # accidentally defines process_before_every_sampling twice; the later raw
+    # alwayson_scripts loop wins and ignores this priority for execution.
+    # Skimmed CFG therefore enforces its post-CFG precedence by prepending its
+    # callback explicitly. We still clone from the CURRENT forge_objects.unet,
+    # so other unet-patching scripts compose regardless of load order.
     sorting_priority = -27
 
     def title(self):
@@ -1804,6 +1957,8 @@ class AnimaSafePAG(scripts.Script):
         return scripts.AlwaysVisible
 
     def ui(self, is_img2img):
+        clip_choices = _clip_model_choices()
+        default_clip = clip_choices[0] if clip_choices else None
         with gr.Accordion("Anima Perturbation Guidance (PAG / SEG / SLG)", open=False):
             gr.Markdown(
                 "Anima/Cosmos/Predict2 계열 **DiT 전용** perturbation guidance. 후반 블록에 "
@@ -2010,6 +2165,11 @@ class AnimaSafePAG(scripts.Script):
                     info="품질 손실 시 1~2로 두고, 속도 우선이면 값을 키우거나 0(항상 생략)을 쓰세요.",
                     elem_id="anima_safe_pag_adg_interval",
                 )
+            gr.Markdown(
+                "Adaptive Guidance와 다른 변형을 병용할 때는 "
+                "`Skip after ≥ 0.65`부터 시작하는 편이 안전합니다. "
+                "TeaCache는 이 Suite에 포함하지 않습니다."
+            )
 
             gr.Markdown("---\n### Guidance Orchestrator (CFG / Wavelet / Control)")
             gr.Markdown(
@@ -2175,10 +2335,111 @@ class AnimaSafePAG(scripts.Script):
                 info="노이즈 분포가 과장되면 기본값 3.0으로 되돌린 뒤 Strength를 낮추세요.",
                 elem_id="anima_guidance_cns_gamma_scale",
             )
+
             gr.Markdown(
-                "Adaptive Guidance와 병용할 때는 `Skip after ≥ 0.65`부터 시작하는 "
-                "편이 안전합니다. TeaCache는 이 Suite에 포함하지 않습니다."
+                "---\n### Anima Modulation Guidance (보조 CLIP-L)\n"
+                "⚠️ **실험 기능 · Anima 전용 · 기본 OFF.** 메인 Qwen conditioning을 "
+                "교체하지 않습니다. 별도 CLIP-L의 pooled embedding을 공개 Cosmos/Anima "
+                "어댑터로 투영해 선택한 DiT block의 AdaLN에 더합니다. 첫 사용 시 공식 "
+                "어댑터 약 171 MB를 내려받으며, CLIP-L과 어댑터는 이후 생성을 위해 CPU "
+                "RAM에 캐시됩니다. 스타일 LoRA가 약해지거나 단순히 결과가 달라질 수 "
+                "있으므로 여러 seed로 비교하세요."
             )
+            mod_enabled = gr.Checkbox(
+                label="Enable Anima Modulation Guidance (CLIP-L)",
+                value=False,
+                elem_id="anima_mod_guidance_enable",
+            )
+            mod_clip_model = gr.Dropdown(
+                label="CLIP-L model (models/text_encoder)",
+                choices=clip_choices,
+                value=default_clip,
+                allow_custom_value=True,
+                info=(
+                    "권장: Anzhc NoobAI11 CLIP L Anime. CLIP-G는 제공된 "
+                    "768차원 어댑터와 호환되지 않습니다."
+                ),
+                elem_id="anima_mod_guidance_clip_model",
+            )
+            mod_weight = gr.Slider(
+                label="Direction weight w",
+                minimum=-20.0,
+                maximum=20.0,
+                step=0.05,
+                value=3.0,
+                info=(
+                    "positive−negative 방향의 배율입니다. 이미지가 과하게 바뀌거나 "
+                    "스타일이 약해지면 낮추세요. w=0도 base CLIP modulation은 남습니다."
+                ),
+                elem_id="anima_mod_guidance_weight",
+            )
+            with gr.Row():
+                mod_start_layer = gr.Slider(
+                    label="Start block (포함)",
+                    minimum=0,
+                    maximum=63,
+                    step=1,
+                    value=0,
+                    info="구도·프롬프트 준수가 약해지면 더 뒤 block부터 시작하세요.",
+                    elem_id="anima_mod_guidance_start_layer",
+                )
+                mod_end_layer = gr.Slider(
+                    label="End block (포함 · -1=마지막)",
+                    minimum=-1,
+                    maximum=63,
+                    step=1,
+                    value=-1,
+                    info="영향이 과하면 범위를 줄이세요. -1은 마지막 block까지입니다.",
+                    elem_id="anima_mod_guidance_end_layer",
+                )
+            mod_base_source = gr.Radio(
+                label="Base CLIP prompt source",
+                choices=["Main positive", "Custom"],
+                value="Main positive",
+                info="Main positive는 현재 생성 프롬프트에서 LoRA 태그만 제거해 사용합니다.",
+                elem_id="anima_mod_guidance_base_source",
+            )
+            mod_base_prompt = gr.Textbox(
+                label="Custom base CLIP prompt",
+                value="",
+                lines=2,
+                info="Base source가 Custom일 때만 사용합니다.",
+                elem_id="anima_mod_guidance_base_prompt",
+            )
+            mod_positive_prompt = gr.Textbox(
+                label="Positive direction prompt",
+                value="masterpiece, best quality, highres",
+                lines=2,
+                info="이 방향이 과하게 스타일을 덮으면 태그를 줄이거나 w를 낮추세요.",
+                elem_id="anima_mod_guidance_positive_prompt",
+            )
+            mod_negative_source = gr.Radio(
+                label="Negative direction source",
+                choices=["Main negative", "Custom"],
+                value="Main negative",
+                info="Main negative는 현재 네거티브 프롬프트를 사용합니다.",
+                elem_id="anima_mod_guidance_negative_source",
+            )
+            mod_negative_prompt = gr.Textbox(
+                label="Custom negative direction prompt",
+                value="worst quality, low quality",
+                lines=2,
+                info="Negative source가 Custom일 때만 사용합니다.",
+                elem_id="anima_mod_guidance_negative_prompt",
+            )
+            with gr.Accordion("Modulation adapter (고급)", open=False):
+                mod_adapter_mode = gr.Radio(
+                    label="Adapter source",
+                    choices=["Auto-download official", "Local file"],
+                    value="Auto-download official",
+                    elem_id="anima_mod_guidance_adapter_mode",
+                )
+                mod_adapter_path = gr.Textbox(
+                    label="Local adapter path",
+                    value="",
+                    info="Local file 모드에서만 사용합니다.",
+                    elem_id="anima_mod_guidance_adapter_path",
+                )
         return [
             enabled, attn_method, scale, legacy_strength, block_indices,
             slg_on, slg_scale, slg_blocks,
@@ -2196,6 +2457,13 @@ class AnimaSafePAG(scripts.Script):
             # Appended for the same reason when SMC/CWM became independent
             # toggles instead of entries in the cfg_mode radio.
             smc_enabled, cwm_enabled,
+            # Appended in v0.20 so every older script-argument index remains
+            # stable across infotext/API/Live Workspace restoration.
+            mod_enabled, mod_clip_model, mod_weight,
+            mod_start_layer, mod_end_layer,
+            mod_base_source, mod_base_prompt, mod_positive_prompt,
+            mod_negative_source, mod_negative_prompt,
+            mod_adapter_mode, mod_adapter_path,
         ]
 
     def process_before_every_sampling(self, p, *args, **kwargs):
@@ -2217,6 +2485,16 @@ class AnimaSafePAG(scripts.Script):
         _DCW.update(on=False, steps=0)
         _DAVE.update(on=False, targets=set(), steps=0)
         _CNS.update(on=False, warned=False)
+        _MOD.update(
+            on=False,
+            targets=set(),
+            block_modulations=None,
+            typed={},
+            hits=0,
+            warned=False,
+            clip_model="",
+            adapter_path="",
+        )
         _STATE.update(
             on=False, attn_method=None, attn_targets=set(), head_spec="",
             strength=0.75, rescale_mode="full",
@@ -2229,6 +2507,7 @@ class AnimaSafePAG(scripts.Script):
             requested_cfg_stack=False, requested_smc=False,
             requested_cwm=False, requested_dcw=False,
             requested_dave=False, requested_cns=False,
+            requested_modulation=False,
             requested_method=None, engine="?",
             diag_started_at=time.perf_counter(), delta_logged=False,
             attn_hook_hits=0, attn_hook_hits_total=0,
@@ -2323,6 +2602,11 @@ class AnimaSafePAG(scripts.Script):
             if "cns_enabled" in xyz
             else _as_bool(_arg(35, False), False)
         )
+        mod_enabled = (
+            _as_bool(xyz["mod_enabled"], _as_bool(_arg(44, False), False))
+            if "mod_enabled" in xyz
+            else _as_bool(_arg(44, False), False)
+        )
         resolved_apg = apg_enabled or cfg_mode == "apg" or experimental_stack
         resolved_smc = (
             smc_enabled or experimental_stack or cfg_mode in {"smc", "smc+cwm"}
@@ -2342,6 +2626,7 @@ class AnimaSafePAG(scripts.Script):
             requested_dcw=dcw_enabled,
             requested_dave=dave_enabled,
             requested_cns=cns_enabled,
+            requested_modulation=mod_enabled,
         )
 
         if not any((
@@ -2354,6 +2639,7 @@ class AnimaSafePAG(scripts.Script):
             dcw_enabled,
             dave_enabled,
             cns_enabled,
+            mod_enabled,
         )):
             return
 
@@ -2428,6 +2714,34 @@ class AnimaSafePAG(scripts.Script):
             cns_gamma_scale = _xyz_num(
                 "cns_gamma_scale", float(_arg(38, 3.0))
             )
+            mod_clip_model = str(_arg(45, "") or "").strip()
+            mod_weight = _xyz_num(
+                "mod_weight", float(_arg(46, 3.0))
+            )
+            mod_start_layer = _xyz_num(
+                "mod_start_layer", float(_arg(47, 0))
+            )
+            mod_end_layer = _xyz_num(
+                "mod_end_layer", float(_arg(48, -1))
+            )
+            mod_base_source = str(
+                _arg(49, "Main positive")
+            ).strip().lower()
+            mod_base_custom = str(_arg(50, "") or "")
+            mod_positive_prompt = str(
+                _arg(51, "masterpiece, best quality, highres") or ""
+            )
+            mod_negative_source = str(
+                _arg(52, "Main negative")
+            ).strip().lower()
+            mod_negative_custom = str(
+                _arg(53, "worst quality, low quality") or ""
+            )
+            mod_adapter_mode = str(
+                _arg(54, "Auto-download official") or
+                "Auto-download official"
+            )
+            mod_adapter_path = str(_arg(55, "") or "")
         except Exception as e:
             _STATE["on"] = False
             _APG["on"] = False
@@ -2470,6 +2784,13 @@ class AnimaSafePAG(scripts.Script):
         cns_strength = _finite_clamp(cns_strength, 0.0, 1.0, 1.0)
         cns_gamma_power = _finite_clamp(cns_gamma_power, 0.05, 2.0, 0.5)
         cns_gamma_scale = _finite_clamp(cns_gamma_scale, 0.25, 25.0, 3.0)
+        mod_weight = _finite_clamp(mod_weight, -20.0, 20.0, 3.0)
+        mod_start_layer = int(
+            _finite_clamp(mod_start_layer, 0.0, 1024.0, 0.0)
+        )
+        mod_end_layer = int(
+            _finite_clamp(mod_end_layer, -1.0, 1024.0, -1.0)
+        )
 
         requested_start, requested_end = min(start, end), max(start, end)
         effective_end = requested_end
@@ -2541,14 +2862,16 @@ class AnimaSafePAG(scripts.Script):
         else:
             _ADG["on"] = False
 
-        # ---- Perturbation: Anima-only, needs the attention/block patches. ----
+        # ---- Anima block features: perturbation, DAVE, CLIP modulation. ----
         pert_ok = False
         dave_ok = False
+        mod_ok = False
         attn_targets: set = set()
         slg_targets: set = set()
         dave_targets: set = set()
+        mod_targets: set = set()
         nblocks = 0
-        if pert_enabled or dave_enabled:
+        if pert_enabled or dave_enabled or mod_enabled:
             if engine != "Anima":
                 if pert_enabled:
                     _log(
@@ -2556,6 +2879,10 @@ class AnimaSafePAG(scripts.Script):
                     )
                 if dave_enabled:
                     _log(f"engine={engine} (not 'Anima') — DAVE skipped.")
+                if mod_enabled:
+                    _log(
+                        f"engine={engine} (not 'Anima') — CLIP modulation skipped."
+                    )
             else:
                 dm = _get_diffusion_model(unet)
                 if dm is None:
@@ -2564,7 +2891,111 @@ class AnimaSafePAG(scripts.Script):
                         "features skipped."
                     )
                 else:
-                    nblocks = _ensure_patched(dm)
+                    blocks = getattr(dm, "blocks", None)
+                    nblocks = len(blocks) if blocks is not None else 0
+                    if nblocks and mod_enabled:
+                        normalized_end = (
+                            nblocks - 1
+                            if mod_end_layer < 0
+                            else min(mod_end_layer, nblocks - 1)
+                        )
+                        normalized_start = min(
+                            max(mod_start_layer, 0),
+                            nblocks - 1,
+                        )
+                        if normalized_start > normalized_end:
+                            _log(
+                                "CLIP modulation has an empty block range "
+                                f"({mod_start_layer}..{mod_end_layer}); skipped."
+                            )
+                        else:
+                            if not mod_clip_model:
+                                choices = _clip_model_choices()
+                                mod_clip_model = choices[0] if choices else ""
+                            main_positive = _first_processing_prompt(
+                                p,
+                                negative=False,
+                            )
+                            main_negative = _first_processing_prompt(
+                                p,
+                                negative=True,
+                            )
+                            base_prompt = (
+                                mod_base_custom
+                                if mod_base_source == "custom"
+                                else main_positive
+                            )
+                            negative_prompt = (
+                                mod_negative_custom
+                                if mod_negative_source == "custom"
+                                else main_negative
+                            )
+                            try:
+                                forge_root, models_root = (
+                                    _forge_and_models_roots()
+                                )
+                                prepared_at = time.perf_counter()
+                                block_modulations, mod_meta = (
+                                    prepare_block_modulations(
+                                        forge_root=forge_root,
+                                        models_root=models_root,
+                                        clip_model=mod_clip_model,
+                                        prompts=(
+                                            base_prompt,
+                                            mod_positive_prompt,
+                                            negative_prompt,
+                                        ),
+                                        adapter_mode=mod_adapter_mode,
+                                        adapter_path=mod_adapter_path,
+                                        diffusion_model=dm,
+                                        weight=mod_weight,
+                                    )
+                                )
+                                mod_targets = set(
+                                    range(
+                                        normalized_start,
+                                        normalized_end + 1,
+                                    )
+                                )
+                                _MOD.update(
+                                    on=True,
+                                    weight=mod_weight,
+                                    targets=mod_targets,
+                                    block_modulations=block_modulations,
+                                    typed={},
+                                    hits=0,
+                                    warned=False,
+                                    clip_model=mod_meta["clip_path"],
+                                    adapter_path=mod_meta["adapter_path"],
+                                    start_layer=normalized_start,
+                                    end_layer=normalized_end,
+                                    base_prompt=base_prompt,
+                                    positive_prompt=mod_positive_prompt,
+                                    negative_prompt=negative_prompt,
+                                )
+                                mod_ok = True
+                                _log(
+                                    "CLIP modulation prepared ✅ "
+                                    f"clip={Path(mod_meta['clip_path']).name} "
+                                    f"w={mod_weight:g} blocks="
+                                    f"{normalized_start}-{normalized_end} "
+                                    f"({time.perf_counter() - prepared_at:.2f}s)"
+                                )
+                            except Exception as exc:
+                                _MOD["on"] = False
+                                _MOD["block_modulations"] = None
+                                _log(
+                                    "CLIP modulation disabled for this "
+                                    "generation: "
+                                    f"{type(exc).__name__}: {exc}"
+                                )
+
+                    if nblocks and (pert_enabled or dave_enabled or mod_ok):
+                        nblocks = _ensure_patched(dm)
+                        if not nblocks and mod_ok:
+                            mod_ok = False
+                            _MOD["on"] = False
+                            _MOD["block_modulations"] = None
                     if nblocks:
                         if pert_enabled:
                             if attn_method and scale > 0:
@@ -2595,6 +3026,13 @@ class AnimaSafePAG(scripts.Script):
             tau=dave_tau,
             targets=dave_targets,
         )
+        if not mod_ok:
+            _MOD.update(
+                on=False,
+                targets=set(),
+                block_modulations=None,
+                typed={},
+            )
 
         if pert_ok:
             _STATE.update(
@@ -2626,6 +3064,7 @@ class AnimaSafePAG(scripts.Script):
             _DCW["on"],
             _DAVE["on"],
             _CNS["on"],
+            _MOD["on"],
         )):
             return
 
@@ -2700,6 +3139,13 @@ class AnimaSafePAG(scripts.Script):
                     f"strength={cns_strength}, gamma_power={cns_gamma_power}, "
                     f"gamma_scale={cns_gamma_scale}"
                 )
+            if _MOD["on"]:
+                p.extra_generation_params["Anima Modulation Guidance"] = (
+                    f"w={_MOD['weight']:g}, "
+                    f"blocks={_MOD['start_layer']}-{_MOD['end_layer']}, "
+                    f"clip={Path(_MOD['clip_model']).name}, "
+                    f"adapter={Path(_MOD['adapter_path']).name}"
+                )
             if _ADG["on"]:
                 p.extra_generation_params["Anima Adaptive Guidance"] = (
                     f"skip_after={_ADG['start']:.2f}, keep_every={_ADG['interval']}"
@@ -2722,7 +3168,13 @@ class AnimaSafePAG(scripts.Script):
                 f"AdaptiveG={'on' if _ADG['on'] else 'off'} "
                 f"(skip_after={_ADG['start']} keep_every={_ADG['interval']}) "
                 f"CFGBase={_CFG['mode']} stack={_CFG['experimental_stack']} "
-                f"DCW={_DCW['on']} DAVE={_DAVE['on']} CNS={_CNS['on']}"
+                f"DCW={_DCW['on']} DAVE={_DAVE['on']} CNS={_CNS['on']} "
+                f"Mod={'on' if _MOD['on'] else 'off'}"
+                + (
+                    f"(w={_MOD['weight']:g}, "
+                    f"blocks={_MOD['start_layer']}-{_MOD['end_layer']})"
+                    if _MOD["on"] else ""
+                )
             )
         except Exception as e:
             _STATE["on"] = False
@@ -2733,6 +3185,12 @@ class AnimaSafePAG(scripts.Script):
             _DCW["on"] = False
             _DAVE["on"] = False
             _CNS["on"] = False
+            _MOD.update(
+                on=False,
+                targets=set(),
+                block_modulations=None,
+                typed={},
+            )
             _RUNTIME.reset_pass()
             _log(f"failed to attach hooks: {type(e).__name__}: {e}")
 
@@ -2755,6 +3213,7 @@ class AnimaSafePAG(scripts.Script):
             _STATE["requested_dcw"],
             _STATE["requested_dave"],
             _STATE["requested_cns"],
+            _STATE["requested_modulation"],
         ))
         if guidance_diagnostics_enabled() and verify_requested:
             elapsed = None
@@ -2873,12 +3332,21 @@ class AnimaSafePAG(scripts.Script):
                     else "INERT(no ancestral/SDE noise call)"
                 )
             )
+            modulation_verdict = (
+                "OFF"
+                if not _STATE["requested_modulation"]
+                else (
+                    f"APPLIED({_MOD['hits']} block hits)"
+                    if _MOD["hits"] > 0 else "NO-OP"
+                )
+            )
             _log(
                 "[VERIFY] suite: "
                 f"attention={attention_verdict}, "
                 f"CFG={requested_mode}:{cfg_verdict} "
                 f"(w_eff={scale_text}, fit={fit_text}), "
-                f"DCW={dcw_verdict}, DAVE={dave_verdict}, CNS={cns_verdict}"
+                f"DCW={dcw_verdict}, DAVE={dave_verdict}, CNS={cns_verdict}, "
+                f"Modulation={modulation_verdict}"
             )
         _STATE["on"] = False
         _APG["on"] = False
@@ -2895,10 +3363,19 @@ class AnimaSafePAG(scripts.Script):
         _DCW.update(on=False, steps=0)
         _DAVE.update(on=False, targets=set(), steps=0)
         _CNS.update(on=False, warned=False)
+        _MOD.update(
+            on=False,
+            targets=set(),
+            block_modulations=None,
+            typed={},
+            hits=0,
+            warned=False,
+        )
         # Drop the stashed latent-sized tensors so they don't sit in VRAM
         # between generations (they'd otherwise linger until the next gen).
         _STATE["attn_raw"] = None
         _STATE["slg_raw"] = None
+        _STATE["cond_raw"] = None
         _STATE["adg_skipped"] = False
         _STATE["attn_spatial_shape"] = None
         _STATE["attn_hook_hits"] = 0
@@ -2922,9 +3399,12 @@ class AnimaSafePAG(scripts.Script):
         _STATE["requested_adg"] = False
         _STATE["requested_cfg_mode"] = "preserve"
         _STATE["requested_cfg_stack"] = False
+        _STATE["requested_smc"] = False
+        _STATE["requested_cwm"] = False
         _STATE["requested_dcw"] = False
         _STATE["requested_dave"] = False
         _STATE["requested_cns"] = False
+        _STATE["requested_modulation"] = False
         _STATE["requested_method"] = None
         _STATE["engine"] = "?"
         _STATE["diag_started_at"] = None

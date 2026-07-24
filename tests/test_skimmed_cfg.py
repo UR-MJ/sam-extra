@@ -203,6 +203,45 @@ class SkimmedCFGTests(unittest.TestCase):
         args["uncond_denoised"] = torch.zeros(1, 4, 4, 4)  # shape mismatch
         self.assertIs(self.skim._post_cfg(args), args["denoised"])
 
+    def test_prepend_is_first_deduplicated_and_preserves_other_callbacks(self):
+        calls = []
+
+        def other_a(args):
+            calls.append("a")
+            return args["denoised"]
+
+        def stale_skim(args):
+            calls.append("stale")
+            return args["denoised"]
+
+        stale_skim._sam_extra_post_cfg_owner = self.skim._POST_CFG_OWNER
+
+        def other_b(args):
+            calls.append("b")
+            return args["denoised"]
+
+        unet = types.SimpleNamespace(
+            model_options={
+                "unrelated": 7,
+                "sampler_post_cfg_function": [other_a, stale_skim, other_b],
+            }
+        )
+
+        self.skim._prepend_post_cfg_function(unet)
+        callbacks = unet.model_options["sampler_post_cfg_function"]
+
+        self.assertIs(callbacks[0], self.skim._post_cfg)
+        self.assertEqual(callbacks[1:], [other_a, other_b])
+        self.assertEqual(
+            sum(
+                getattr(fn, "_sam_extra_post_cfg_owner", None)
+                == self.skim._POST_CFG_OWNER
+                for fn in callbacks
+            ),
+            1,
+        )
+        self.assertEqual(unet.model_options["unrelated"], 7)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

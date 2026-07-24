@@ -117,6 +117,14 @@ class AnimaSafePagTests(unittest.TestCase):
         p._DCW.update(on=False, steps=0)
         p._DAVE.update(on=False, targets=set(), steps=0)
         p._CNS.update(on=False, warned=False)
+        p._MOD.update(
+            on=False,
+            targets=set(),
+            block_modulations=None,
+            typed={},
+            hits=0,
+            warned=False,
+        )
         p._RUNTIME.reset_pass()
 
     def _fake_apply_model(self, x, timestep, **conditioning):
@@ -388,6 +396,13 @@ class AnimaSafePagTests(unittest.TestCase):
         )
         p._APG["on"] = True
         p._ADG["on"] = True
+        p._MOD.update(
+            on=True,
+            targets={0},
+            block_modulations=torch.ones(1, 6),
+            typed={(0, "cpu", "torch.float32"): torch.ones(6)},
+            hits=3,
+        )
         process = p.AnimaSafePAG()
         request = types.SimpleNamespace(extra_generation_params={})
 
@@ -400,6 +415,38 @@ class AnimaSafePagTests(unittest.TestCase):
         self.assertEqual(p._STATE["slg_targets"], set())
         self.assertFalse(p._APG["on"])
         self.assertFalse(p._ADG["on"])
+        self.assertFalse(p._MOD["on"])
+        self.assertEqual(p._MOD["targets"], set())
+        self.assertIsNone(p._MOD["block_modulations"])
+        self.assertEqual(p._MOD["typed"], {})
+
+    def test_postprocess_releases_modulation_and_weak_tensors(self):
+        p = self.pag
+        p._STATE.update(
+            attn_raw=torch.ones(1),
+            slg_raw=torch.ones(1),
+            cond_raw=torch.ones(1),
+            requested_modulation=True,
+        )
+        p._MOD.update(
+            on=True,
+            targets={0},
+            block_modulations=torch.ones(1, 6),
+            typed={(0, "cpu", "torch.float32"): torch.ones(6)},
+            hits=2,
+        )
+
+        p.AnimaSafePAG().postprocess(None, None)
+
+        self.assertFalse(p._MOD["on"])
+        self.assertEqual(p._MOD["targets"], set())
+        self.assertIsNone(p._MOD["block_modulations"])
+        self.assertEqual(p._MOD["typed"], {})
+        self.assertEqual(p._MOD["hits"], 0)
+        self.assertIsNone(p._STATE["attn_raw"])
+        self.assertIsNone(p._STATE["slg_raw"])
+        self.assertIsNone(p._STATE["cond_raw"])
+        self.assertFalse(p._STATE["requested_modulation"])
 
     def test_effective_cfg_recovery_retains_linear_edit_strength(self):
         p = self.pag
@@ -732,6 +779,12 @@ class AnimaSafePagTests(unittest.TestCase):
             "official_strength, head_indices, rescale_mode",
             source,
         )
+        self.assertIn("anima_mod_guidance_enable", source)
+        self.assertIn("anima_mod_guidance_clip_model", source)
+        self.assertIn(
+            "mod_enabled, mod_clip_model, mod_weight",
+            source,
+        )
         self.assertNotIn(
             'with gr.Accordion("DCW (post-CFG wavelet correction)"',
             source,
@@ -770,6 +823,10 @@ class AnimaSafePagTests(unittest.TestCase):
             "색 노이즈·거친 입자·구조 변형이 과하면 먼저 낮추세요.",
             source,
         )
+        self.assertIn(
+            "w=0도 base CLIP modulation은 남습니다.",
+            source,
+        )
         self.assertGreaterEqual(source.count("info="), 30)
 
     def test_empty_block_spec_uses_upstream_safe_default(self):
@@ -781,6 +838,7 @@ class AnimaSafePagTests(unittest.TestCase):
                 "Anima Perturbation Guidance": "PAG",
                 "Anima APG": "APG",
                 "Anima Adaptive Guidance": "AdaptiveG",
+                "Anima Modulation Guidance": "Mod",
                 "Steps": 20,
                 "Unrelated Extension": "keep me",
             }

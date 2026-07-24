@@ -19,8 +19,14 @@ To keep upstream's composition semantics, the skimmed predictions are written
 back into Forge's own tensors in place. Forge rebuilds the post-CFG args dict
 per registered function but reuses the same prediction tensors, so later hooks
 (Safe PAG's SMC/APG/CWM base, the PAG/SEG/SLG delta, DCW) see the skim exactly
-as a ComfyUI graph would. This script sorts before Safe PAG so that ordering
-holds.
+as a ComfyUI graph would.
+
+Forge Neo currently defines ``ScriptRunner.process_before_every_sampling``
+twice; the later definition iterates the raw ``alwayson_scripts`` list and
+therefore bypasses ``sorting_priority``. To retain pre-CFG semantics without a
+Forge core edit, this script explicitly prepends its post-CFG hook to the
+cloned UNet's callback list. The insertion is owner-tagged and de-duplicated so
+hires passes and script reloads cannot stack stale copies.
 """
 
 from __future__ import annotations
@@ -56,6 +62,7 @@ _SKIM: dict = {
 }
 
 _MIN_SCALE = 1e-6
+_POST_CFG_OWNER = "sam-extra/anima-skimmed-cfg"
 
 
 def _log(message: str) -> None:
@@ -266,11 +273,47 @@ def _post_cfg(args):
         return denoised
 
 
+_post_cfg._sam_extra_post_cfg_owner = _POST_CFG_OWNER
+
+
+def _prepend_post_cfg_function(unet, function=_post_cfg) -> None:
+    """Install ``function`` first while preserving every unrelated callback.
+
+    ``ModelPatcher.set_model_sampler_post_cfg_function`` is intentionally an
+    append-only ComfyUI API. Skimmed CFG emulates a *pre*-CFG prediction rewrite,
+    though, so it must run before every ordinary post-CFG transform. Owner
+    tagging removes both this module's current function and a stale function
+    left by WebUI's "Reload scripts" before inserting exactly one copy.
+    """
+    model_options = getattr(unet, "model_options", None)
+    if not isinstance(model_options, dict):
+        model_options = {}
+
+    callbacks = model_options.get("sampler_post_cfg_function", [])
+    if not isinstance(callbacks, (list, tuple)):
+        callbacks = []
+    kept = [
+        callback
+        for callback in callbacks
+        if getattr(callback, "_sam_extra_post_cfg_owner", None)
+        != _POST_CFG_OWNER
+    ]
+    function._sam_extra_post_cfg_owner = _POST_CFG_OWNER
+
+    # Copy the top-level dict instead of mutating a possibly shared options
+    # object. ModelPatcher.clone() already deep-copies it in current Forge, but
+    # this also keeps compatible forks safe.
+    model_options = dict(model_options)
+    model_options["sampler_post_cfg_function"] = [function, *kept]
+    unet.model_options = model_options
+
+
 class AnimaSkimmedCFG(scripts.Script):
     # Larger sorting_priority appears further down. This places the accordion
-    # directly under Anima Detail Daemon (-29) and above Anima Safe PAG (-27),
-    # and the same order registers our post-CFG hook BEFORE the Safe PAG suite
-    # so its default "preserve incoming" keeps the skimmed result.
+    # directly under Anima Detail Daemon (-29) and above Anima Safe PAG (-27).
+    # Runtime hook precedence does NOT rely on this value;
+    # _prepend_post_cfg_function enforces it explicitly because current Forge
+    # ignores the sorted runner method.
     sorting_priority = -28
 
     def title(self):
@@ -397,9 +440,12 @@ class AnimaSkimmedCFG(scripts.Script):
             _log("no forge_objects.unet — cannot attach skimming.")
             return
 
-        # Clone from the CURRENT unet so other patching scripts compose.
+        # Clone from the CURRENT unet so other patching scripts compose. Do not
+        # use the append-only setter here: Forge's raw always-on script order
+        # currently runs anima_safe_pag.py before this file, and appending would
+        # make Skimmed discard the already-computed PAG/CWM/SMC/DCW result.
         unet = unet.clone()
-        unet.set_model_sampler_post_cfg_function(_post_cfg)
+        _prepend_post_cfg_function(unet)
         p.sd_model.forge_objects.unet = unet
 
         if not hasattr(p, "extra_generation_params"):

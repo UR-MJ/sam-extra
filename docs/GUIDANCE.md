@@ -10,6 +10,10 @@ SAM3 처리 모듈은 초기화하지 않고 `sam3ext.guidance`의 경량 수학
 > 경로를 확인했습니다.
 > 이는 **훅과 수식이 실행된다는 검증**이며, 모든 sampler·attention backend에서 화질이
 > 더 좋아진다는 보장은 아닙니다.
+>
+> 2026-07-24 추가된 Anima Modulation Guidance는 실제 권장 CLIP-L과 공식 170 MB
+> 어댑터의 로드·투영 및 Forge block AdaLN 주입을 검증했습니다. 이 릴리즈에서는 실제
+> checkpoint 이미지 A/B까지 완료했다는 뜻은 아닙니다.
 
 ## 구성
 
@@ -23,6 +27,7 @@ SAM3 처리 모듈은 초기화하지 않고 `sam3ext.guidance`의 경량 수학
 | `sam3ext/guidance/dcw.py` | post-CFG wavelet correction |
 | `sam3ext/guidance/dave.py` | Anima block DC attenuation |
 | `sam3ext/guidance/cns.py` | 기존 sampler noise의 wavelet 재색칠 |
+| `sam3ext/guidance/modulation.py` | 보조 CLIP-L·공식 어댑터 로드와 block AdaLN 투영 |
 | `scripts/anima_detail_daemon.py` | 별도 Detail Daemon 기능 |
 
 ## 실제 처리 순서
@@ -30,9 +35,11 @@ SAM3 처리 모듈은 초기화하지 않고 `sam3ext.guidance`의 경량 수학
 ```text
 shared.state.sampling_step / sampling_steps
   → model wrapper: ADG cond-only 또는 PAG/SEG/SLG weak-row 확장
-  → Anima block: original forward → DAVE → SLG weak-row restore
+  → Anima block: CLIP modulation AdaLN 가산 → original forward → DAVE
+                 → SLG weak-row restore
   → attention: weak row에만 hard PAG 또는 Gaussian-query SEG
-  → 단일 post-CFG:
+  → post-CFG #1: Skimmed CFG (활성 시 항상 명시적으로 맨 앞)
+  → post-CFG #2: Guidance Suite
       1. CNS용 live x_t 저장
       2. ADG skip이면 APG/SMC state reset 후 incoming 유지
       3. CFG base 토글(SMC → APG → CWM, 켜진 것만)
@@ -81,7 +88,6 @@ UI의 **Attn Scale**과 XYZ의 `[Anima Pert] Attn Scale`은 같은 값입니다.
 | Start / End | 0.0 / 0.7 | 공통 적용 구간 |
 | Rescale | 0.20 | PAG 보정량만 std 보정 |
 | Rescale mode | `full` | `full`=incoming CFG+guidance, `partial`=cond+guidance 기준 |
-| 동시 사용 scale 자동 감쇠 | on | 활성 weak term 수로 각 scale 나눔 |
 
 PAG 자체를 A/B 할 때는 `Rescale=0`, SLG/APG/ADG off로 두어야 원인을 분리할 수 있습니다.
 
@@ -128,8 +134,10 @@ MaHiRo/RescaleCFG/custom CFG를 쓰는 경우 먼저 전부 끈 상태로 비교
   예측 tensor에 다시 씁니다. Forge는 post-CFG 함수마다 args dict를 새로 만들지만 예측
   tensor는 같은 객체를 재사용하므로(`backend/sampling/sampling_function.py`), 뒤따르는
   Safe PAG의 CFG base·PAG/SEG/SLG delta·DCW가 모두 skim 위에서 동작합니다.
-- 이 순서를 보장하려고 스크립트 정렬 우선순위를 Safe PAG보다 앞에 둡니다
-  (Detail Daemon 0 → Skimmed CFG 1 → Safe PAG 2).
+- 현재 Forge Neo에는 `process_before_every_sampling`의 정렬 버전 뒤에 비정렬 버전이 다시
+  정의돼 있어 `sorting_priority`만으로 실행 순서를 보장할 수 없습니다. 따라서 Skimmed
+  callback을 확장 내부에서 post-CFG 목록 **맨 앞에 dedupe+prepend**하여 실제 순서를
+  `Skimmed → Safe PAG`로 고정합니다. Forge 코어 파일은 수정하지 않습니다.
 - 적용 구간(start/end) 밖이거나 CFG=1이라 건너뛴 스텝에서는 예측을 건드리지 않습니다.
 
 ### APG
@@ -183,7 +191,44 @@ out = x − strength × mean(x, token/spatial axes)
 실행 경로는 실제 Anima에서 확인했지만, “다양성 향상” 정도와 안전 block 범위는 고정 시드 여러
 seed로 직접 비교해야 합니다.
 
-## 5. CNS-inspired Wavelet Noise
+## 5. Anima Modulation Guidance (보조 CLIP-L)
+
+Anima의 메인 Qwen conditioning을 교체하지 않고, 별도 CLIP-L pooled embedding을 공개
+Cosmos/Anima 어댑터로 투영해 선택한 block의 `adaln_lora_B_T_3D`에 더합니다.
+
+```text
+projected = MLP(CLIP(prompt))
+mod = projected(base) + w × (projected(positive) − projected(negative))
+block_adaln[i] = original_adaln + adapter.scales[i] ⊙ mod
+```
+
+- 기본 OFF이며 OFF일 때 기존 block 호출은 bitwise 그대로입니다.
+- `w=0`도 **base modulation은 남습니다**. 완전한 비교 기준은 토글 OFF입니다.
+- 권장 CLIP-L은 `models/text_encoder/Anzhc Noobai11 CLIP L Anime.safetensors`입니다.
+  드롭다운은 safetensors 헤더를 읽어 768차원 CLIP-L만 표시하며 CLIP-G/Qwen은 제외합니다.
+- 공식 어댑터가 없으면 첫 사용 시
+  `models/anima_modulation_guidance/checkpoint_4000.pt`에 170,609,044 bytes를 내려받고
+  SHA-256을 검증합니다. Local file 모드도 `torch.load(weights_only=True)`만 사용합니다.
+- CLIP과 어댑터 계산은 CPU에서 generation당 한 번 수행합니다. sampler 중에는 최종
+  block vector만 활성 model device/dtype으로 옮기므로 별도 CLIP forward를 매 step 반복하지
+  않습니다.
+
+| 필드 | 기본값 | 설명 |
+|---|---:|---|
+| Enable Anima Modulation Guidance | off | Anima 전용 전체 토글 |
+| CLIP-L model | 감지된 Anzhc CLIP-L 우선 | `models/text_encoder`의 768차원 CLIP-L |
+| Direction weight `w` | 3.0 | positive−negative 방향 배율 |
+| Start / End block | 0 / -1 | 포함 범위, `-1`은 마지막 block |
+| Base source | Main positive | 현재 프롬프트 또는 Custom |
+| Positive direction | `masterpiece, best quality, highres` | 더하려는 CLIP 방향 |
+| Negative source | Main negative | 현재 네거티브 또는 Custom |
+| Adapter source | Auto-download official | 공식 자동 다운로드 또는 local `.pt` |
+
+방향이 스타일 LoRA를 약화하거나 구도에 지나치게 개입하면 먼저 `w`를 낮추고, 그 다음
+Start block을 뒤로 옮기거나 적용 block 범위를 줄이세요. 반드시 같은 seed 여러 장으로
+토글 OFF와 비교하세요.
+
+## 6. CNS-inspired Wavelet Noise
 
 Euler a, ancestral, SDE처럼 sampler가 원본 noise sampler를 호출할 때만 동작합니다. 새 난수를
 생성하지 않고 **기존 seeded/Brownian 출력**을 live `x_t` Haar 에너지에 맞춰 재색칠하므로 RNG
@@ -200,7 +245,7 @@ Euler a, ancestral, SDE처럼 sampler가 원본 noise sampler를 호출할 때�
 `INERT(no ancestral/SDE noise call)`이 표시됩니다. Adaptive Guidance와 병용할 때는
 `Skip after >= 0.65`부터 시작하는 편이 안전합니다.
 
-## 6. Adaptive Guidance (속도)
+## 7. Adaptive Guidance (속도)
 
 고정 `Skip after` 이후 cond/uncond가 한 batch로 합쳐진 호출에서 uncond 행을 생략합니다.
 논문의 cosine-similarity 판정이 아닌 단순 threshold 구현입니다.
@@ -211,7 +256,7 @@ Euler a, ancestral, SDE처럼 sampler가 원본 noise sampler를 호출할 때�
 - `Keep every N`은 생략 구간에서도 N번째 스텝마다 uncond를 유지합니다.
 - 특정 속도 향상률은 보장하지 않습니다. 검증 로그의 `SKIPPED-UNCOND`로 실제 생략을 확인하세요.
 
-## 7. Detail Daemon
+## 8. Detail Daemon
 
 별도 `Anima Detail Daemon` 아코디언의 sigma schedule 기능입니다. Guidance Suite의 CFG base와는
 별도이며, 모든 모델에서 동작합니다. 자세한 필드는 UI 설명을 따르세요.
@@ -219,9 +264,11 @@ Euler a, ancestral, SDE처럼 sampler가 원본 noise sampler를 호출할 때�
 ## 조합 원칙
 
 - 처음에는 기능 하나씩, 같은 seed로 비교합니다.
-- PAG/SEG는 택1. SLG는 병용 가능하지만 scale 자동 감쇠를 유지합니다.
+- PAG/SEG는 택1이며 SLG는 병용 가능합니다. 자동 scale 감쇠는 제거됐으므로 각 scale을
+  직접 조절합니다.
 - CFG base 토글은 하나씩 켜서 효과를 익힌 뒤 조합하세요. 셋을 한 번에 켜면 서로 영향을 줍니다.
 - DCW는 Suite 내부 마지막입니다. 다른 확장의 post-CFG callback과의 전역 순서는 보장할 수 없습니다.
+- Modulation Guidance는 cond/uncond/PAG weak 행에 같은 block modulation을 적용합니다.
 - CNS는 ancestral/SDE에서만 의미가 있습니다.
 - TeaCache는 이 Suite에 포함하지 않습니다. ADG `keep_every`의 batch 크기 진동 및 stateful guidance와
   캐시가 충돌할 수 있습니다.
@@ -236,6 +283,7 @@ Euler a, ancestral, SDE처럼 sampler가 원본 noise sampler를 호출할 때�
 - `[Anima CFG]`: Base Mode, Experimental Stack
 - `[Anima CWM]`, `[Anima SMC]`
 - `[Anima DCW]`, `[Anima DAVE]`, `[Anima CNS]`
+- `[Anima Mod]`: Enable, Direction Weight, Start/End Block
 - `[Detail Daemon]`
 
 WebUI의 Reload scripts 뒤에도 기존 label은 중복하지 않고 새 label만 추가합니다.
@@ -252,6 +300,7 @@ Anima CFG Orchestrator
 Anima DCW
 Anima DAVE
 Anima CNS Wavelet Noise
+Anima Modulation Guidance
 ```
 
 확장 목록 아래 `Anima Reference-Latent PoC (debug / 안전)`에서
@@ -262,7 +311,7 @@ Anima CNS Wavelet Noise
 [AnimaSafePAG] attention perturb active ✅ hits=... relative_raw_delta=...
 [AnimaSafePAG] [VERIFY] verdict: perturb=..., APG=..., Adaptive=...
 [AnimaSafePAG] [VERIFY] suite: attention=..., CFG=... (w_eff=..., fit=...),
-                               DCW=..., DAVE=..., CNS=...
+                               DCW=..., DAVE=..., CNS=..., Modulation=...
 ```
 
 2026-07-23 실제 최소 검증(256×256, 3 steps):
@@ -284,7 +333,9 @@ python -m unittest discover -s tests -v
 검증 범위는 attention staticmethod binding/weak-row 한정 변경, official SEG 실제 H/W,
 Haar 4D/5D·홀수 크기 round-trip, CWM/SMC/DCW/DAVE 중립값, APG 표준 CFG 환원,
 SMC/CWM 비정상 수치 정리, ADG state flush, CNS 결정성·RNG 비소비·표준편차 보존,
-pass 종료 tensor 해제와 Live Workspaces 자산 구조를 포함합니다.
+Skimmed callback 실제 prepend 순서와 PAG scale 반응, CLIP adapter 수식·Forge Anima
+shape 추론·block AdaLN 무변이 주입, pass 종료 tensor 해제와 Live Workspaces 자산
+구조를 포함합니다.
 
 ## 크레딧
 
@@ -298,6 +349,7 @@ pass 종료 tensor 해제와 Live Workspaces 자산 구조를 포함합니다.
 | Skimmed CFG | [Extraltodeus/Skimmed_CFG](https://github.com/Extraltodeus/Skimmed_CFG) (LICENSE 파일 미공개) | 공개 수식 기반 Forge 재작성, vendor 아님 |
 | DAVE | [daheekwon/DAVE](https://github.com/daheekwon/DAVE) (MIT), [ComfyUI-Anima-DAVE](https://github.com/sorryhyun/ComfyUI-Anima-DAVE) (MIT), [논문](https://arxiv.org/abs/2606.06813) | block 수식 재구현 |
 | CNS | [namemechan/comfyui-cns_sampler_patch](https://github.com/namemechan/comfyui-cns_sampler_patch) (GPL-3.0), [논문](https://arxiv.org/abs/2605.30332) | CNS-inspired 재작성, vendor 아님 |
+| Anima Modulation Guidance | [Anzhc/Anima-Mod-Guidance-ComfyUI-Node](https://github.com/Anzhc/Anima-Mod-Guidance-ComfyUI-Node) (MIT 선언), [quickjkee/modulation-guidance](https://github.com/quickjkee/modulation-guidance) (MIT), [yresearch/cosmos-pooled adapter](https://huggingface.co/yresearch/cosmos-pooled) | 공개 수식·어댑터 형식 기반 Forge block 재작성, vendor 아님 |
 | Detail Daemon | [muerrilla/sd-webui-detail-daemon](https://github.com/muerrilla/sd-webui-detail-daemon) | Forge 재구현 |
 
 원본 저장소를 통째로 포함하지 않았으며, Forge 연결과 상태 관리는 이 확장에서 별도로 작성했습니다.
