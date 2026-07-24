@@ -25,9 +25,12 @@ holds.
 
 from __future__ import annotations
 
+import traceback
+from functools import partial
+
 import gradio as gr
 
-from modules import scripts, shared
+from modules import script_callbacks, scripts, shared
 
 try:
     import torch
@@ -57,6 +60,88 @@ _MIN_SCALE = 1e-6
 
 def _log(message: str) -> None:
     print(f"[AnimaSkimmedCFG] {message}")
+
+
+def _as_bool(value, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in ("true", "1", "yes", "on", "enable", "enabled"):
+            return True
+        if text in ("false", "0", "no", "off", "disable", "disabled"):
+            return False
+        return default
+    try:
+        return bool(value)
+    except Exception:
+        return default
+
+
+# ---------------------------------------------------------------------------
+# XYZ plot integration
+# ---------------------------------------------------------------------------
+
+
+def _skim_xyz_set(p, x, xs, *, field: str):
+    if not hasattr(p, "_anima_skimmed_cfg_xyz"):
+        p._anima_skimmed_cfg_xyz = {}
+    p._anima_skimmed_cfg_xyz[field] = x
+
+
+def _make_skim_xyz_axis() -> None:
+    xyz_grid = None
+    for script in scripts.scripts_data:
+        if script.script_class.__module__ == "xyz_grid.py":
+            xyz_grid = script.module
+            break
+    if xyz_grid is None:
+        return
+    bool_choices = lambda: ["True", "False"]  # noqa: E731
+    axis = [
+        xyz_grid.AxisOption(
+            "[Anima Skim] Enable", str,
+            partial(_skim_xyz_set, field="enabled"), choices=bool_choices,
+        ),
+        xyz_grid.AxisOption(
+            "[Anima Skim] Skimming CFG", float,
+            partial(_skim_xyz_set, field="skimming_cfg"),
+        ),
+        xyz_grid.AxisOption(
+            "[Anima Skim] Full Skim Negative", str,
+            partial(_skim_xyz_set, field="full_skim_negative"),
+            choices=bool_choices,
+        ),
+        xyz_grid.AxisOption(
+            "[Anima Skim] Disable Flipping Filter", str,
+            partial(_skim_xyz_set, field="disable_flipping_filter"),
+            choices=bool_choices,
+        ),
+        xyz_grid.AxisOption(
+            "[Anima Skim] Start", float,
+            partial(_skim_xyz_set, field="start"),
+        ),
+        xyz_grid.AxisOption(
+            "[Anima Skim] End", float,
+            partial(_skim_xyz_set, field="end"),
+        ),
+        xyz_grid.AxisOption(
+            "[Anima Skim] Flip At", float,
+            partial(_skim_xyz_set, field="flip_at"),
+        ),
+    ]
+    if not any(a.label.startswith("[Anima Skim]") for a in xyz_grid.axis_options):
+        xyz_grid.axis_options.extend(axis)
+
+
+def _skim_on_before_ui() -> None:
+    try:
+        _make_skim_xyz_axis()
+    except Exception:
+        _log("xyz_grid axis registration failed:\n" + traceback.format_exc())
+
+
+script_callbacks.on_before_ui(_skim_on_before_ui)
 
 
 def _sampling_position() -> tuple[int, int]:
@@ -255,8 +340,18 @@ class AnimaSkimmedCFG(scripts.Script):
         if torch is None:
             return
 
+        xyz = getattr(p, "_anima_skimmed_cfg_xyz", {}) or {}
+
         def _arg(i, default):
             return args[i] if len(args) > i else default
+
+        def _xyz_num(key, cur):
+            if key in xyz:
+                try:
+                    return float(xyz[key])
+                except (TypeError, ValueError):
+                    return cur
+            return cur
 
         _SKIM.update(on=False, steps=0, warned=False)
 
@@ -264,22 +359,30 @@ class AnimaSkimmedCFG(scripts.Script):
             enabled = bool(_arg(0, False))
         except Exception:
             enabled = False
+        if "enabled" in xyz:
+            enabled = _as_bool(xyz["enabled"], enabled)
         if not enabled:
             return
 
         try:
-            start = float(_arg(4, 0.0))
-            end = float(_arg(5, 1.0))
+            start = _xyz_num("start", float(_arg(4, 0.0)))
+            end = _xyz_num("end", float(_arg(5, 1.0)))
             if end < start:
                 start, end = end, start
             _SKIM.update(
                 on=True,
-                skimming_cfg=float(_arg(1, 7.0)),
-                full_skim_negative=bool(_arg(2, False)),
-                disable_flipping_filter=bool(_arg(3, False)),
+                skimming_cfg=_xyz_num("skimming_cfg", float(_arg(1, 7.0))),
+                full_skim_negative=_as_bool(
+                    xyz.get("full_skim_negative", _arg(2, False)),
+                    bool(_arg(2, False)),
+                ),
+                disable_flipping_filter=_as_bool(
+                    xyz.get("disable_flipping_filter", _arg(3, False)),
+                    bool(_arg(3, False)),
+                ),
                 start=min(max(start, 0.0), 1.0),
                 end=min(max(end, 0.0), 1.0),
-                flip_at=min(max(float(_arg(6, 0.0)), 0.0), 1.0),
+                flip_at=min(max(_xyz_num("flip_at", float(_arg(6, 0.0))), 0.0), 1.0),
             )
         except Exception as exc:
             _SKIM["on"] = False

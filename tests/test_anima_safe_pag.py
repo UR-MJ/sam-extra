@@ -98,6 +98,7 @@ class AnimaSafePagTests(unittest.TestCase):
             control_blocked_calls=0,
             wrapper_fallbacks=0,
             delta_logged=False,
+            cond_raw=None,
         )
         p._APG["on"] = False
         p._ADG["on"] = False
@@ -651,6 +652,43 @@ class AnimaSafePagTests(unittest.TestCase):
 
         torch.testing.assert_close(out, expected)
         self.assertFalse(torch.equal(out, guided * factor))
+
+    def test_perturbation_ignores_upstream_rewrites_of_cond_denoised(self):
+        """A prior post-CFG hook may rewrite Forge's prediction tensors.
+
+        PAG must keep differencing the weak prediction against the cond it was
+        derived from, otherwise the rewrite leaks a constant offset into
+        scale*(cond - weak) and dilutes both scale and strength."""
+        p = self.pag
+        cond = torch.tensor([[1.0, -2.0, 0.5, 3.0]])
+        weak = torch.tensor([[0.5, -1.0, 0.25, 1.5]])
+        base = torch.zeros_like(cond)
+        p._STATE.update(
+            attn_raw=weak, slg_raw=None, cond_raw=cond,
+            attn_scale=4.0, rescale=0.0,
+        )
+
+        clean = p._apply_perturbation({"cond_denoised": cond}, base)
+        # Emulate Skimmed CFG rewriting the shared prediction tensor.
+        rewritten = cond + 0.75
+        skimmed = p._apply_perturbation({"cond_denoised": rewritten}, base)
+
+        torch.testing.assert_close(skimmed, clean)
+        torch.testing.assert_close(clean, 4.0 * (cond - weak))
+
+    def test_perturbation_falls_back_when_no_cond_was_captured(self):
+        p = self.pag
+        cond = torch.tensor([[1.0, -2.0, 0.5, 3.0]])
+        weak = torch.tensor([[0.5, -1.0, 0.25, 1.5]])
+        base = torch.zeros_like(cond)
+        p._STATE.update(
+            attn_raw=weak, slg_raw=None, cond_raw=None,
+            attn_scale=2.0, rescale=0.0,
+        )
+
+        out = p._apply_perturbation({"cond_denoised": cond}, base)
+
+        torch.testing.assert_close(out, 2.0 * (cond - weak))
 
     def test_partial_rescale_uses_conditional_prediction_for_std_source(self):
         p = self.pag

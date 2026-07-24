@@ -144,6 +144,7 @@ _STATE: dict = {
     "attn_shape_warned": False,   # emit layout mismatch warning only once
     "attn_raw": None,     # stashed attention-perturbed denoised x0
     "slg_raw": None,      # stashed layer-skipped denoised x0
+    "cond_raw": None,     # cond rows the weak predictions were derived from
     "apg_autooff_rescale": True,  # skip PAG rescale while APG is on (toggleable)
     "adg_skipped": False,  # current model evaluation used cond-only ADG
     "requested_start": 0.0,
@@ -1043,6 +1044,7 @@ def _model_wrapper(apply_model, w):
             _STATE["step"] = _sampling_position()[0]
             _STATE["attn_raw"] = None
             _STATE["slg_raw"] = None
+            _STATE["cond_raw"] = None
             _STATE["adg_skipped"] = False
 
         chunk = batch // len(cou)
@@ -1134,6 +1136,14 @@ def _model_wrapper(apply_model, w):
             _clear_markers()
 
         out = out_ext[:batch]
+        # The cond rows the weak predictions were derived from. post_cfg must
+        # difference the weak prediction against THIS tensor, not against
+        # args["cond_denoised"]: another post-CFG hook (our own Skimmed CFG
+        # included) may legitimately rewrite Forge's prediction tensors in
+        # place before we run, and a rewritten cond leaks a constant offset
+        # into scale·(cond − weak), diluting the PAG/SEG scale and strength.
+        cond_rows = out.index_select(0, idx).detach().float()
+        _STATE["cond_raw"] = cond_rows
         if a0 is not None:
             _STATE["attn_raw"] = out_ext[a0:a1].detach().float()
         if s0 is not None:
@@ -1142,7 +1152,7 @@ def _model_wrapper(apply_model, w):
 
         if a0 is not None:
             weak = _STATE["attn_raw"]
-            cond = out.index_select(0, idx).detach().float()
+            cond = cond_rows
             rel_delta = None
             if weak is not None and weak.shape == cond.shape:
                 denom = torch.linalg.vector_norm(cond).clamp_min(1e-8)
@@ -1173,6 +1183,7 @@ def _model_wrapper(apply_model, w):
         _clear_markers()
         _STATE["attn_raw"] = None
         _STATE["slg_raw"] = None
+        _STATE["cond_raw"] = None
         _log(f"wrapper fallback → normal apply_model: {type(e).__name__}: {e}")
         return apply_model(x, ts, **c)
 
@@ -1393,6 +1404,13 @@ def _apply_perturbation(args, base):
     each scale when >1 term was active, has been removed).
     Returns ``base`` unchanged on any problem."""
     cd = args["cond_denoised"].float()
+    # Prefer the cond captured next to the weak predictions. Any post-CFG hook
+    # that ran before us may have rewritten args["cond_denoised"] in place, and
+    # differencing a rewritten cond against an un-rewritten weak injects a
+    # constant offset that dilutes both the scale and the strength control.
+    cond_raw = _STATE.get("cond_raw")
+    if torch.is_tensor(cond_raw) and cond_raw.shape == cd.shape:
+        cd = cond_raw.float()
     attn_raw = _STATE["attn_raw"]
     slg_raw = _STATE["slg_raw"]
 
@@ -2217,6 +2235,7 @@ class AnimaSafePAG(scripts.Script):
             attn_last_rel_delta=None,
             attn_diag_logged=False, attn_shape_warned=False,
             attn_spatial_shape=None, attn_raw=None, slg_raw=None,
+            cond_raw=None,
             adg_skipped=False, step_open=False,
         )
         _clear_markers()
@@ -2589,7 +2608,7 @@ class AnimaSafePAG(scripts.Script):
                 start=requested_start, end=effective_end,
                 requested_start=requested_start, requested_end=requested_end,
                 range_mode=range_mode,
-                active=0, attn_raw=None, slg_raw=None,
+                active=0, attn_raw=None, slg_raw=None, cond_raw=None,
                 attn_hook_hits=0, attn_last_rel_delta=None,
                 attn_diag_logged=False, attn_shape_warned=False,
                 attn_spatial_shape=None, adg_skipped=False,

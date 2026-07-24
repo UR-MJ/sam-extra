@@ -3,6 +3,16 @@
 버전 태그는 GitHub Releases에도 발행됩니다. 아래는 요약이며, guidance/속도 기능의
 상세는 [docs/GUIDANCE.md](docs/GUIDANCE.md)를 참고하세요.
 
+## v0.19.1 — PAG cond 오염 수정 + Skimmed CFG XYZ
+
+- **PAG/SEG 보정항 오염 수정**: `_apply_perturbation`이 weak 예측을 만들 때 사용한 원본
+  cond(`_STATE["cond_raw"]`)와 차분하도록 변경. Skimmed CFG처럼 우리보다 먼저 도는
+  post-CFG 훅이 Forge의 `cond_denoised`를 제자리에서 덮어쓰면, 덮어쓰인 cond와 차분하면서
+  상수 오프셋이 섞여 scale·strength 반응이 둔해지던 문제를 제거. 캡처 텐서가 없거나 형상이
+  다르면 기존 `args["cond_denoised"]` 경로로 폴백. 회귀 테스트 2개 추가.
+- **Skimmed CFG XYZ 축 추가**: `[Anima Skim] Enable / Skimming CFG / Full Skim Negative /
+  Disable Flipping Filter / Start / End / Flip At` 7종을 xyz_grid에 등록.
+
 ## v0.19.0 — LoRA 벌크/컨텍스트 전송을 Forge로 (ComfyUI 하드코딩 제거)
 
 멀티 선택 후 우클릭 "한번에 넣기"가 ComfyUI로만 가서 못 쓰던 문제를 해결. 매니저의 모든

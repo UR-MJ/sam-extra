@@ -27,6 +27,9 @@ def _load_skim_module():
     modules_stub.shared = types.SimpleNamespace(
         state=types.SimpleNamespace(sampling_step=0, sampling_steps=20)
     )
+    modules_stub.script_callbacks = types.SimpleNamespace(
+        on_before_ui=lambda fn: None
+    )
 
     old_modules = sys.modules.get("modules")
     sys.modules["modules"] = modules_stub
