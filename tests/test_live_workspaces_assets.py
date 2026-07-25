@@ -8,6 +8,31 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class LiveWorkspaceAssetTests(unittest.TestCase):
+    def test_extra_network_tabs_are_relocated_not_hidden(self):
+        """The Generation/TI/Checkpoints/Lora strip must survive the layout.
+
+        #txt2img_extra_tabs owns that strip. The layout pulls
+        #txt2img_settings and the gallery out of its Generation tab, so if the
+        strip itself is left behind it becomes a child of #tab_txt2img — which
+        this layout hides wholesale — and the Lora/Checkpoints/TI browsers
+        become unreachable.
+        """
+        script = (ROOT / "javascript" / "live_workspaces.js").read_text(
+            encoding="utf-8"
+        )
+        css = (ROOT / "style.css").read_text(encoding="utf-8")
+
+        self.assertIn("function adoptExtraNetworkTabs(layout)", script)
+        self.assertIn("adoptExtraNetworkTabs(layout)", script)
+        self.assertIn('app().querySelector("#txt2img_extra_tabs")', script)
+        # Must be moved into the new layout, and only when not already there.
+        self.assertIn("layout.contains(extraTabs)", script)
+        self.assertIn('extraTabs.classList.add("sam3-live-extra-tabs")', script)
+        self.assertIn("host.appendChild(extraTabs)", script)
+        # Relocation target is the prompt section, i.e. below prompt/negative.
+        self.assertIn('layout.querySelector(".sam3-live-prompt")', script)
+        self.assertIn("#sam3_live_child_layout .sam3-live-extra-tabs", css)
+
     def test_child_layout_stays_inside_gradio_container(self):
         script = (ROOT / "javascript" / "live_workspaces.js").read_text(
             encoding="utf-8"

@@ -1120,7 +1120,25 @@
         parameterTarget.appendChild(scriptContainer);
         layout.querySelector('[data-column="scripts"] > div').appendChild(scriptSection);
         layout.querySelector('[data-column="gallery"] > div').appendChild(gallerySection);
+        adoptExtraNetworkTabs(layout);
         return true;
+    }
+
+    // Forge's extra-network browsers (Generation | Textual Inversion |
+    // Checkpoints | Lora) live inside #txt2img_extra_tabs. The Generation tab
+    // is where #txt2img_settings and the gallery come from, so both are pulled
+    // out above — but the tab strip itself must be relocated too. Left behind
+    // it becomes a child of #tab_txt2img, which this layout hides wholesale,
+    // making the Lora/Checkpoints/TI browsers unreachable and making Forge log
+    // "Attempted to select a non-interactive or hidden tab" on every switch.
+    function adoptExtraNetworkTabs(layout) {
+        var extraTabs = app().querySelector("#txt2img_extra_tabs");
+        if (!extraTabs || layout.contains(extraTabs)) return;
+        var host = layout.querySelector(".sam3-live-prompt");
+        if (!host) return;
+        extraTabs.classList.add("sam3-live-extra-tabs");
+        // Directly below the prompt/negative row, where Forge shows it.
+        host.appendChild(extraTabs);
     }
 
     async function mountChildFrame() {

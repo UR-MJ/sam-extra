@@ -335,6 +335,17 @@ html.sam3-live-frame-active .sam3-live-original-root {
     background: var(--background-fill-secondary, #101827);
 }
 
+/* Relocated Forge extra-network tabs (Generation / Textual Inversion /
+   Checkpoints / Lora). The Generation tab keeps its strip but its body is
+   empty here, because Parameters and Gallery own those nodes now. */
+#sam3_live_child_layout .sam3-live-extra-tabs {
+    margin-top: .5rem;
+}
+
+#sam3_live_child_layout .sam3-live-extra-tabs > .tabitem:empty {
+    display: none;
+}
+
 .sam3-native-workspace-bar > strong {
     flex: 0 0 auto;
     color: var(--color-accent, #fb923c);
