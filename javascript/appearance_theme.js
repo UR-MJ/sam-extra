@@ -12,6 +12,7 @@
         "OLED Mono": "oled-mono",
     });
     var currentSlug = DEFAULT_SLUG;
+    var addedDarkClass = false;
 
     function normalizeTheme(value) {
         return THEME_SLUGS[value] || DEFAULT_SLUG;
@@ -51,7 +52,32 @@
         return Array.from(roots);
     }
 
+    // Every custom palette is dark, but Gradio gates a large amount of its own
+    // and Forge's CSS on a `dark` class that Gradio puts on document.body only
+    // when its resolved theme is dark (default is __theme=system). Without it a
+    // light-mode session gets a hybrid: our near-white body text over
+    // light-mode-only surfaces — pale toast backgrounds, light Prism colours on
+    // a near-black code block, and `ul.options li.selected` painted with
+    // --neutral-100. Add the class ourselves, and remember that we did so we
+    // never strip a `dark` that Gradio owns when returning to Forge Default.
+    function syncDarkClass() {
+        var body = document.body;
+        if (!body || !body.classList) return;
+        if (currentSlug === DEFAULT_SLUG) {
+            if (addedDarkClass) {
+                body.classList.remove("dark");
+                addedDarkClass = false;
+            }
+            return;
+        }
+        if (!body.classList.contains("dark")) {
+            body.classList.add("dark");
+            addedDarkClass = true;
+        }
+    }
+
     function syncThemeRoots() {
+        syncDarkClass();
         collectRoots().forEach(function (root) {
             if (!root || !root.dataset) return;
             if (currentSlug === DEFAULT_SLUG) {

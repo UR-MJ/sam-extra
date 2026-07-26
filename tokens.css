@@ -26,7 +26,7 @@
     --sam3-color-focus: oklch(78% .180 55);
     --sam3-color-error: oklch(58% .180 25);
     --sam3-color-error-hover: oklch(63% .170 25);
-    --sam3-color-error-ink: oklch(96% .008 25);
+    --sam3-color-error-ink: oklch(99% .008 25);
     --sam3-color-success: oklch(69% .130 145);
     --sam3-color-shadow: oklch(5% .006 55 / .48);
 
@@ -76,7 +76,7 @@
     --sam3-color-focus: oklch(78% .180 55);
     --sam3-color-error: oklch(58% .180 25);
     --sam3-color-error-hover: oklch(63% .170 25);
-    --sam3-color-error-ink: oklch(96% .008 25);
+    --sam3-color-error-ink: oklch(99% .008 25);
     --sam3-color-success: oklch(69% .130 145);
     --sam3-color-shadow: oklch(5% .006 55 / .48);
 }
@@ -98,9 +98,9 @@
     --sam3-color-accent-strong: oklch(61% .155 300);
     --sam3-color-accent-ink: oklch(14% .020 300);
     --sam3-color-focus: oklch(81% .180 300);
-    --sam3-color-error: oklch(59% .180 25);
+    --sam3-color-error: oklch(58% .180 25);
     --sam3-color-error-hover: oklch(64% .170 25);
-    --sam3-color-error-ink: oklch(96% .008 25);
+    --sam3-color-error-ink: oklch(99% .008 25);
     --sam3-color-success: oklch(70% .125 145);
     --sam3-color-shadow: oklch(4% .010 300 / .52);
 }
@@ -122,9 +122,9 @@
     --sam3-color-accent-strong: oklch(65% .135 70);
     --sam3-color-accent-ink: oklch(17% .022 60);
     --sam3-color-focus: oklch(84% .155 80);
-    --sam3-color-error: oklch(59% .175 25);
+    --sam3-color-error: oklch(58% .175 25);
     --sam3-color-error-hover: oklch(64% .165 25);
-    --sam3-color-error-ink: oklch(96% .010 30);
+    --sam3-color-error-ink: oklch(99% .010 30);
     --sam3-color-success: oklch(70% .120 145);
     --sam3-color-shadow: oklch(5% .015 55 / .52);
 }
@@ -148,7 +148,7 @@
     --sam3-color-focus: oklch(82% .095 75);
     --sam3-color-error: oklch(58% .170 25);
     --sam3-color-error-hover: oklch(63% .160 25);
-    --sam3-color-error-ink: oklch(96% .006 25);
+    --sam3-color-error-ink: oklch(99% .006 25);
     --sam3-color-success: oklch(72% .095 145);
     --sam3-color-shadow: oklch(3% .005 270 / .60);
 }

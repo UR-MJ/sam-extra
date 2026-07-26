@@ -2,7 +2,14 @@
  * genre: atmospheric · macrostructure: Workbench
  * tone: technical · anchor hues: ember / violet / amber / low-chroma neutral
  * design-system: design.md · designed-as-app
- * contrast: pass (40–41) · slop: pass (component scope)
+ * contrast: text pairs measured pass — body 16.9-18.5:1, muted 5.6-6.3:1,
+ *   error text 5.1-5.6:1, cancel-button label 4.50-4.52:1 (WCAG 1.4.3).
+ *   KNOWN GAP: --sam3-color-rule is 1.36-1.58:1 against its own surface, below
+ *   the 3:1 WCAG 1.4.11 floor for control boundaries, and input fills sit only
+ *   1.03-1.07:1 from the block background so the border is effectively the sole
+ *   affordance. Closing it needs the rule lightness raised ~30% -> ~48%, which
+ *   is a deliberate visual change to the palette rather than a tuning fix.
+ * slop: pass (component scope)
  */
 @import url("./tokens.css");
 
@@ -391,7 +398,11 @@ html.sam3-notebook-layout-active .sam3-notebook-original-root {
 
 .sam3-fast-dropdown-proxy[data-state="error"] .sam3-fast-dropdown-indicator::before {
     content: "!";
-    color: var(--sam3-color-error, var(--error-text-color));
+    /* --sam3-color-error is the FILL that white-ish error-ink sits on, so it is
+       too dark to be read as text on a panel surface (4.30-4.46:1). The lighter
+       --sam3-color-error-hover is the palette's error text value and is what
+       --error-text-color already resolves to (5.12-5.58:1). */
+    color: var(--sam3-color-error-hover, var(--error-text-color));
     font-weight: 700;
 }
 

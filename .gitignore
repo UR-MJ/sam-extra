@@ -19,6 +19,10 @@ lora_manager_vendor/
 # Added by code-review-graph
 .code-review-graph/
 
+# Frontend test tooling (jsdom). package.json / package-lock.json are tracked;
+# the installed tree is not.
+node_modules/
+
 # Assistant scratch/working directories — never part of the extension.
 .codex/
 .hallmark/
