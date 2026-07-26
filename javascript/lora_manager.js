@@ -40,6 +40,9 @@
     var SPAWN_RESULT = null;
     var injected = { txt2img: false, img2img: false };
     var refs = {}; // tab -> {container, navBtns, panes, myBtn, myPane, myIndex, loraIdx, controlsDiv}
+    var bootstrapObserver = null;
+    var bootstrapInterval = null;
+    var bootstrapTimeout = null;
 
     function app() {
         return (typeof gradioApp === "function") ? gradioApp() : document;
@@ -104,6 +107,7 @@
         var myBtn = document.createElement("button");
         myBtn.textContent = "Manage";
         myBtn.className = navBtns[0].className;
+        myBtn.classList.remove("selected");
         myBtn.setAttribute("data-sam3-lm-btn", "1");
         myBtn.style.cursor = "pointer";
         var controlsDiv = nav.querySelector(":scope > .extra-networks-controls-div");
@@ -137,9 +141,9 @@
             container.appendChild(myPane);
         }
 
-        var allBtns = navBtns.concat([myBtn]);
-        var allPanes = panes.concat([myPane]);
-        var myIndex = allBtns.length - 1;
+        // Retained only as the "manager is selected" sentinel for selectTab and
+        // the refs entry; visibility itself resolves live nodes on every click.
+        var myIndex = navBtns.length;
 
         // LoRA tab index (by stable pane id, i18n-proof) — for replace mode.
         var loraIdx = -1;
@@ -147,24 +151,148 @@
             if (panes[i].id === tab + "_lora") { loraIdx = i; break; }
         }
 
-        function selectTab(idx) {
-            for (var k = 0; k < allPanes.length; k++) {
-                allPanes[k].style.display = (k === idx) ? "block" : "none";
-                if (allBtns[k]) {
-                    if (k === idx) allBtns[k].classList.add("selected");
-                    else allBtns[k].classList.remove("selected");
-                }
-            }
-            if (controlsDiv) controlsDiv.style.display = (idx === myIndex) ? "none" : "";
-            if (idx === myIndex) ensureServer(frame, statusEl);
+        // Gradio 4.40 does not unmount a non-selected TabItem; its compiled
+        // component only writes an inline display through Svelte's set_style
+        // (`k(e,"display", selected===id && visible ? "block" : "none")`). Our
+        // synthetic pane is outside that Svelte tree, so Gradio will never
+        // touch it and hiding it is entirely up to this code. Worse, clicking
+        // our synthetic button does not change Gradio's `selected` state, so
+        // when the user later clicks the tab they came from, Gradio's reactive
+        // block is not even dirty and does nothing at all. If our own listener
+        // is missing for that button, the manager stays on screen forever.
+        //
+        // So do not bind to node references captured at injection time: any
+        // re-render of the tab strip would silently drop those listeners. Use
+        // one delegated listener on the container and resolve the live nodes on
+        // every click instead.
+        function liveNav() {
+            return container.querySelector(":scope > div.tab-nav");
         }
 
-        allBtns.forEach(function (btn, idx) {
-            btn.addEventListener("click", function () {
-                // defer so Gradio's own handler settles first, then enforce.
-                setTimeout(function () { selectTab(idx); }, 0);
+        function liveButtons() {
+            var nav2 = liveNav();
+            return nav2
+                ? Array.prototype.slice.call(nav2.querySelectorAll(":scope > button"))
+                : [];
+        }
+
+        function livePanes() {
+            return Array.prototype.slice.call(
+                container.querySelectorAll(":scope > .tabitem")
+            );
+        }
+
+        // Which native tab to hand the content area back to when the manager
+        // closes. Restoring is our job: Gradio's `selected` state never changed
+        // while the manager was up (our button is not a Svelte tab), so its
+        // reactive block is not dirty and it will not re-show anything. Clearing
+        // the inline display instead of setting it would be worse than useless
+        // — with no inline value a .tabitem div falls back to display:block and
+        // every pane would show at once.
+        var savedNativeIndex = -1;
+        var manageActive = false;
+
+        function showManage(active) {
+            manageActive = active;
+            var nativeBtns = liveButtons().filter(function (btn) {
+                return btn !== myBtn && !btn.hasAttribute("data-sam3-lm-btn");
             });
+            var nativePanes = livePanes().filter(function (pane) {
+                return pane !== myPane;
+            });
+            var selectedNow = nativeBtns.findIndex(function (btn) {
+                return btn.classList.contains("selected");
+            });
+
+            if (active) {
+                if (selectedNow >= 0) savedNativeIndex = selectedNow;
+                nativePanes.forEach(function (pane) {
+                    pane.style.display = "none";
+                });
+                myPane.style.display = "block";
+                nativeBtns.forEach(function (btn) {
+                    btn.classList.remove("selected");
+                });
+                myBtn.classList.add("selected");
+            } else {
+                myPane.style.display = "none";
+                myBtn.classList.remove("selected");
+                // If Gradio just handled a real tab click it has already marked
+                // that button selected and positioned its pane; honour that.
+                // Otherwise fall back to whatever was open before the manager.
+                var target = selectedNow >= 0 ? selectedNow : savedNativeIndex;
+                if (target < 0 || target >= nativePanes.length) target = 0;
+                nativePanes.forEach(function (pane, index) {
+                    pane.style.display = (index === target) ? "block" : "none";
+                });
+                if (selectedNow < 0 && nativeBtns[target]) {
+                    nativeBtns[target].classList.add("selected");
+                }
+                savedNativeIndex = -1;
+            }
+
+            var nav2 = liveNav();
+            var controls = nav2
+                ? nav2.querySelector(":scope > .extra-networks-controls-div")
+                : null;
+            if (controls) controls.style.display = active ? "none" : "";
+            if (active) ensureServer(frame, statusEl);
+        }
+
+        function selectTab(idx) {
+            showManage(idx === myIndex);
+        }
+
+        function isOurButton(btn) {
+            return btn === myBtn || (btn && btn.hasAttribute
+                && btn.hasAttribute("data-sam3-lm-btn"));
+        }
+
+        container.addEventListener("click", function (event) {
+            var btn = event.target && event.target.closest
+                ? event.target.closest("button")
+                : null;
+            if (!btn) return;
+            var nav2 = liveNav();
+            if (!nav2 || btn.parentNode !== nav2) return;
+            if (isOurButton(btn)) {
+                setTimeout(function () { showManage(true); }, 0);
+                return;
+            }
+            // A native tab must close the manager immediately. Do not wait for
+            // Gradio: when it already considers that tab selected (it never saw
+            // our synthetic tab take over) its reactive block is not dirty and
+            // it will not fire at all, so nothing else would close us.
+            showManage(false);
         });
+
+        // Safety net for the ordering we cannot control: Gradio flushes its own
+        // tab switch asynchronously, so a click handled above may run before the
+        // new selection lands. Watching the nav for the moment Gradio marks any
+        // native tab selected closes the manager regardless of that ordering.
+        // showManage(false) itself only ever sets a native button selected while
+        // manageActive is already false, so this cannot loop.
+        var navWatcher = new MutationObserver(function () {
+            if (!manageActive) return;
+            var stillOurs = liveButtons().some(function (btn) {
+                return isOurButton(btn) && btn.classList.contains("selected");
+            });
+            var nativeSelected = liveButtons().some(function (btn) {
+                return !isOurButton(btn) && btn.classList.contains("selected");
+            });
+            if (nativeSelected || !stillOurs) showManage(false);
+        });
+
+        // Observe the container rather than the nav itself so a replaced tab
+        // strip keeps being watched.
+        try {
+            navWatcher.observe(container, {
+                attributes: true,
+                attributeFilter: ["class"],
+                subtree: true,
+                childList: true
+            });
+        } catch (e) {}
 
         refs[tab] = {
             container: container, navBtns: navBtns, panes: panes,
@@ -269,6 +397,25 @@
         return a && b;
     }
 
+    function stopBootstrapWatchers() {
+        if (bootstrapObserver) {
+            try { bootstrapObserver.disconnect(); } catch (e) {}
+            bootstrapObserver = null;
+        }
+        if (bootstrapInterval) {
+            clearInterval(bootstrapInterval);
+            bootstrapInterval = null;
+        }
+        if (bootstrapTimeout) {
+            clearTimeout(bootstrapTimeout);
+            bootstrapTimeout = null;
+        }
+    }
+
+    function tryAllAndStop() {
+        if (tryAll()) stopBootstrapWatchers();
+    }
+
     function loadConfig() {
         bridgeCall("sam3_lm_config_btn", "sam3_lm_config_out", 120000)
             .then(function (raw) {
@@ -350,28 +497,23 @@
     }
 
     function start() {
-        var params = new URLSearchParams(window.location.search);
-        // Inside a Live Workspace child *iframe* the shell hosts one shared LoRA
-        // Manager overlay, so skip the per-workspace tab injection (which would
-        // nest a third iframe and duplicate the manager). A native workspace tab
-        // (top-level, window.parent === window) has no shell, so it keeps its
-        // own tab.
-        var inLiveChildFrame =
-            params.has("__sam3_live_workspace") && window.parent !== window;
-
-        if (!inLiveChildFrame) {
-            tryAll();
-            // Keep trying as the DOM finishes building (heavy first render).
-            var obs = new MutationObserver(function () { tryAll(); });
-            try { obs.observe(document.documentElement, { childList: true, subtree: true }); } catch (e) {}
-            var iv = setInterval(tryAll, 800);
-            setTimeout(function () { try { obs.disconnect(); } catch (e) {} clearInterval(iv); }, 300000);
-            // config affects only replace-mode/availability — fetch independently.
-            loadConfig();
+        tryAllAndStop();
+        // Keep trying only while either Forge tab is still absent. Once both
+        // injections succeed, disconnect immediately so ordinary dropdown
+        // rendering does not wake a document-wide MutationObserver.
+        if (!injected.txt2img || !injected.img2img) {
+            bootstrapObserver = new MutationObserver(tryAllAndStop);
+            try {
+                bootstrapObserver.observe(
+                    document.documentElement,
+                    { childList: true, subtree: true }
+                );
+            } catch (e) {}
+            bootstrapInterval = setInterval(tryAllAndStop, 800);
+            bootstrapTimeout = setTimeout(stopBootstrapWatchers, 300000);
         }
-
-        // Always listen: in a Live child frame this receives the sam3-add-lora
-        // message the shell forwards from the shared manager overlay.
+        // Config affects only replace-mode/availability — fetch independently.
+        loadConfig();
         attachLoraBridge();
     }
 

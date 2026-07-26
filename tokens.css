@@ -1,0 +1,301 @@
+/* Hallmark · tokens: sam-extra Forge Appearance · design-system: design.md
+ * palettes: Graphite Ember · Obsidian Violet · Warm Espresso · OLED Mono
+ */
+
+:root {
+    --sam3-font-display: "Source Sans Pro", ui-sans-serif, system-ui, sans-serif;
+    --sam3-font-body: "Source Sans Pro", ui-sans-serif, system-ui, sans-serif;
+    --sam3-font-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+
+    /* Safe fallbacks for SAM3-owned UI when Forge theme variables are absent. */
+    --sam3-color-paper: oklch(13% .008 55);
+    --sam3-color-paper-2: oklch(16% .009 55);
+    --sam3-color-paper-3: oklch(19% .010 55);
+    --sam3-color-paper-4: oklch(23% .011 55);
+    --sam3-color-ink: oklch(94% .006 70);
+    --sam3-color-ink-2: oklch(77% .008 65);
+    --sam3-color-muted: oklch(64% .008 60);
+    --sam3-color-neutral: oklch(48% .009 58);
+    --sam3-color-rule: oklch(31% .010 55);
+    --sam3-color-rule-2: oklch(26% .009 55);
+    --sam3-color-accent-subtle: oklch(24% .035 45);
+    --sam3-color-accent: oklch(68% .170 45);
+    --sam3-color-accent-hover: oklch(74% .155 45);
+    --sam3-color-accent-strong: oklch(58% .160 42);
+    --sam3-color-accent-ink: oklch(15% .012 45);
+    --sam3-color-focus: oklch(78% .180 55);
+    --sam3-color-error: oklch(58% .180 25);
+    --sam3-color-error-hover: oklch(63% .170 25);
+    --sam3-color-error-ink: oklch(96% .008 25);
+    --sam3-color-success: oklch(69% .130 145);
+    --sam3-color-shadow: oklch(5% .006 55 / .48);
+
+    --sam3-space-3xs: .125rem;
+    --sam3-space-2xs: .25rem;
+    --sam3-space-xs: .5rem;
+    --sam3-space-sm: .75rem;
+    --sam3-space-md: 1rem;
+    --sam3-space-lg: 1.5rem;
+    --sam3-space-xl: 2.5rem;
+
+    --sam3-text-xs: .75rem;
+    --sam3-text-sm: .875rem;
+    --sam3-text-base: 1rem;
+    --sam3-text-md: 1.125rem;
+
+    --sam3-radius-xs: .125rem;
+    --sam3-radius-sm: .25rem;
+    --sam3-radius-md: .375rem;
+    --sam3-radius-lg: .5rem;
+
+    --sam3-ease-out: cubic-bezier(.16, 1, .3, 1);
+    --sam3-ease-in: cubic-bezier(.7, 0, .84, 0);
+    --sam3-ease-in-out: cubic-bezier(.65, 0, .35, 1);
+    --sam3-dur-micro: 120ms;
+    --sam3-dur-short: 220ms;
+    --sam3-dur-long: 420ms;
+    --sam3-checkbox-check: url("data:image/svg+xml,%3csvg viewBox='0 0 16 16' fill='oklch(15%25%20.012%2045)' xmlns='http://www.w3.org/2000/svg'%3e%3cpath d='M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z'/%3e%3c/svg%3e");
+}
+
+[data-sam3-theme="graphite-ember"] {
+    --sam3-color-paper: oklch(13% .008 55);
+    --sam3-color-paper-2: oklch(16% .009 55);
+    --sam3-color-paper-3: oklch(19% .010 55);
+    --sam3-color-paper-4: oklch(23% .011 55);
+    --sam3-color-ink: oklch(94% .006 70);
+    --sam3-color-ink-2: oklch(77% .008 65);
+    --sam3-color-muted: oklch(64% .008 60);
+    --sam3-color-neutral: oklch(48% .009 58);
+    --sam3-color-rule: oklch(31% .010 55);
+    --sam3-color-rule-2: oklch(26% .009 55);
+    --sam3-color-accent-subtle: oklch(24% .035 45);
+    --sam3-color-accent: oklch(68% .170 45);
+    --sam3-color-accent-hover: oklch(74% .155 45);
+    --sam3-color-accent-strong: oklch(58% .160 42);
+    --sam3-color-accent-ink: oklch(15% .012 45);
+    --sam3-color-focus: oklch(78% .180 55);
+    --sam3-color-error: oklch(58% .180 25);
+    --sam3-color-error-hover: oklch(63% .170 25);
+    --sam3-color-error-ink: oklch(96% .008 25);
+    --sam3-color-success: oklch(69% .130 145);
+    --sam3-color-shadow: oklch(5% .006 55 / .48);
+}
+
+[data-sam3-theme="obsidian-violet"] {
+    --sam3-color-paper: oklch(12% .012 300);
+    --sam3-color-paper-2: oklch(15% .014 300);
+    --sam3-color-paper-3: oklch(19% .016 300);
+    --sam3-color-paper-4: oklch(23% .018 300);
+    --sam3-color-ink: oklch(94% .008 300);
+    --sam3-color-ink-2: oklch(77% .012 300);
+    --sam3-color-muted: oklch(63% .014 300);
+    --sam3-color-neutral: oklch(47% .016 300);
+    --sam3-color-rule: oklch(31% .018 300);
+    --sam3-color-rule-2: oklch(26% .016 300);
+    --sam3-color-accent-subtle: oklch(24% .045 300);
+    --sam3-color-accent: oklch(72% .160 300);
+    --sam3-color-accent-hover: oklch(78% .145 300);
+    --sam3-color-accent-strong: oklch(61% .155 300);
+    --sam3-color-accent-ink: oklch(14% .020 300);
+    --sam3-color-focus: oklch(81% .180 300);
+    --sam3-color-error: oklch(59% .180 25);
+    --sam3-color-error-hover: oklch(64% .170 25);
+    --sam3-color-error-ink: oklch(96% .008 25);
+    --sam3-color-success: oklch(70% .125 145);
+    --sam3-color-shadow: oklch(4% .010 300 / .52);
+}
+
+[data-sam3-theme="warm-espresso"] {
+    --sam3-color-paper: oklch(13% .018 55);
+    --sam3-color-paper-2: oklch(16% .022 55);
+    --sam3-color-paper-3: oklch(20% .025 55);
+    --sam3-color-paper-4: oklch(24% .028 55);
+    --sam3-color-ink: oklch(94% .012 75);
+    --sam3-color-ink-2: oklch(77% .018 70);
+    --sam3-color-muted: oklch(64% .018 65);
+    --sam3-color-neutral: oklch(48% .020 60);
+    --sam3-color-rule: oklch(32% .025 58);
+    --sam3-color-rule-2: oklch(27% .022 58);
+    --sam3-color-accent-subtle: oklch(25% .040 75);
+    --sam3-color-accent: oklch(76% .140 75);
+    --sam3-color-accent-hover: oklch(82% .125 75);
+    --sam3-color-accent-strong: oklch(65% .135 70);
+    --sam3-color-accent-ink: oklch(17% .022 60);
+    --sam3-color-focus: oklch(84% .155 80);
+    --sam3-color-error: oklch(59% .175 25);
+    --sam3-color-error-hover: oklch(64% .165 25);
+    --sam3-color-error-ink: oklch(96% .010 30);
+    --sam3-color-success: oklch(70% .120 145);
+    --sam3-color-shadow: oklch(5% .015 55 / .52);
+}
+
+[data-sam3-theme="oled-mono"] {
+    --sam3-color-paper: oklch(8% .006 270);
+    --sam3-color-paper-2: oklch(11% .007 270);
+    --sam3-color-paper-3: oklch(14% .008 270);
+    --sam3-color-paper-4: oklch(18% .009 270);
+    --sam3-color-ink: oklch(96% .005 270);
+    --sam3-color-ink-2: oklch(79% .006 270);
+    --sam3-color-muted: oklch(65% .006 270);
+    --sam3-color-neutral: oklch(48% .007 270);
+    --sam3-color-rule: oklch(27% .008 270);
+    --sam3-color-rule-2: oklch(21% .007 270);
+    --sam3-color-accent-subtle: oklch(18% .012 70);
+    --sam3-color-accent: oklch(86% .025 70);
+    --sam3-color-accent-hover: oklch(92% .018 70);
+    --sam3-color-accent-strong: oklch(74% .025 70);
+    --sam3-color-accent-ink: oklch(10% .008 270);
+    --sam3-color-focus: oklch(82% .095 75);
+    --sam3-color-error: oklch(58% .170 25);
+    --sam3-color-error-hover: oklch(63% .160 25);
+    --sam3-color-error-ink: oklch(96% .006 25);
+    --sam3-color-success: oklch(72% .095 145);
+    --sam3-color-shadow: oklch(3% .005 270 / .60);
+}
+
+/*
+ * Bridge the selected semantic palette into Gradio. The data attribute is
+ * present only for a SAM Extra theme; Forge Default removes it completely.
+ */
+[data-sam3-theme] {
+    color-scheme: dark;
+
+    --font: var(--sam3-font-body);
+    --font-mono: var(--sam3-font-mono);
+
+    --neutral-50: var(--sam3-color-ink);
+    --neutral-100: var(--sam3-color-ink);
+    --neutral-200: var(--sam3-color-ink-2);
+    --neutral-300: var(--sam3-color-ink-2);
+    --neutral-400: var(--sam3-color-muted);
+    --neutral-500: var(--sam3-color-neutral);
+    --neutral-600: var(--sam3-color-rule);
+    --neutral-700: var(--sam3-color-paper-4);
+    --neutral-800: var(--sam3-color-paper-3);
+    --neutral-900: var(--sam3-color-paper-2);
+    --neutral-950: var(--sam3-color-paper);
+
+    --primary-50: var(--sam3-color-accent-subtle);
+    --primary-100: var(--sam3-color-accent-subtle);
+    --primary-200: var(--sam3-color-accent-subtle);
+    --primary-300: var(--sam3-color-focus);
+    --primary-400: var(--sam3-color-focus);
+    --primary-500: var(--sam3-color-accent);
+    --primary-600: var(--sam3-color-accent);
+    --primary-700: var(--sam3-color-accent-strong);
+    --primary-800: var(--sam3-color-accent-strong);
+    --primary-900: var(--sam3-color-accent-strong);
+    --primary-950: var(--sam3-color-accent-strong);
+
+    --body-background-fill: var(--sam3-color-paper);
+    --body-text-color: var(--sam3-color-ink);
+    --body-text-color-subdued: var(--sam3-color-muted);
+    --background-fill-primary: var(--sam3-color-paper);
+    --background-fill-secondary: var(--sam3-color-paper-2);
+    --block-background-fill: var(--sam3-color-paper-2);
+    --block-border-color: var(--sam3-color-rule);
+    --block-info-text-color: var(--sam3-color-muted);
+    --block-label-background-fill: var(--sam3-color-paper-3);
+    --block-label-border-color: var(--sam3-color-rule);
+    --block-label-text-color: var(--sam3-color-ink-2);
+    --block-title-background-fill: var(--sam3-color-paper-2);
+    --block-title-border-color: var(--sam3-color-rule);
+    --block-title-text-color: var(--sam3-color-ink);
+    --border-color-primary: var(--sam3-color-rule);
+    --border-color-accent: var(--sam3-color-accent);
+    --border-color-accent-subdued: var(--sam3-color-accent-subtle);
+    --panel-background-fill: var(--sam3-color-paper-2);
+    --panel-border-color: var(--sam3-color-rule);
+    --accordion-text-color: var(--sam3-color-ink);
+
+    --input-background-fill: var(--sam3-color-paper-3);
+    --input-background-fill-hover: var(--sam3-color-paper-4);
+    --input-background-fill-focus: var(--sam3-color-paper-3);
+    --input-border-color: var(--sam3-color-rule);
+    --input-border-color-hover: var(--sam3-color-muted);
+    --input-border-color-focus: var(--sam3-color-focus);
+    --input-placeholder-color: var(--sam3-color-muted);
+    --input-shadow: none;
+    --input-shadow-focus: none;
+
+    --button-primary-background-fill: var(--sam3-color-accent);
+    --button-primary-background-fill-hover: var(--sam3-color-accent-hover);
+    --button-primary-border-color: var(--sam3-color-accent);
+    --button-primary-border-color-hover: var(--sam3-color-accent-hover);
+    --button-primary-text-color: var(--sam3-color-accent-ink);
+    --button-primary-text-color-hover: var(--sam3-color-accent-ink);
+    --button-secondary-background-fill: var(--sam3-color-paper-3);
+    --button-secondary-background-fill-hover: var(--sam3-color-paper-4);
+    --button-secondary-border-color: var(--sam3-color-rule);
+    --button-secondary-border-color-hover: var(--sam3-color-muted);
+    --button-secondary-text-color: var(--sam3-color-ink);
+    --button-secondary-text-color-hover: var(--sam3-color-ink);
+    --button-cancel-background-fill: var(--sam3-color-error);
+    --button-cancel-background-fill-hover: var(--sam3-color-error-hover);
+    --button-cancel-border-color: var(--sam3-color-error);
+    --button-cancel-border-color-hover: var(--sam3-color-error-hover);
+    --button-cancel-text-color: var(--sam3-color-error-ink);
+    --button-cancel-text-color-hover: var(--sam3-color-error-ink);
+    --button-shadow: none;
+    --button-shadow-hover: none;
+    --button-shadow-active: none;
+    --button-transition:
+        background-color var(--sam3-dur-micro) var(--sam3-ease-out),
+        border-color var(--sam3-dur-micro) var(--sam3-ease-out),
+        color var(--sam3-dur-micro) var(--sam3-ease-out),
+        transform var(--sam3-dur-micro) var(--sam3-ease-out);
+
+    --checkbox-background-color: var(--sam3-color-paper-3);
+    --checkbox-background-color-hover: var(--sam3-color-paper-4);
+    --checkbox-background-color-focus: var(--sam3-color-paper-3);
+    --checkbox-background-color-selected: var(--sam3-color-accent);
+    --checkbox-border-color: var(--sam3-color-rule);
+    --checkbox-border-color-hover: var(--sam3-color-muted);
+    --checkbox-border-color-focus: var(--sam3-color-focus);
+    --checkbox-border-color-selected: var(--sam3-color-accent);
+    --checkbox-check: var(--sam3-checkbox-check);
+    --checkbox-label-background-fill: var(--sam3-color-paper-2);
+    --checkbox-label-background-fill-hover: var(--sam3-color-paper-3);
+    --checkbox-label-background-fill-selected: var(--sam3-color-accent-subtle);
+    --checkbox-label-border-color: var(--sam3-color-rule);
+    --checkbox-label-border-color-hover: var(--sam3-color-muted);
+    --checkbox-label-text-color: var(--sam3-color-ink);
+    --checkbox-label-text-color-selected: var(--sam3-color-ink);
+
+    --slider-color: var(--sam3-color-accent);
+    --link-text-color: var(--sam3-color-accent-hover);
+    --link-text-color-hover: var(--sam3-color-focus);
+    --link-text-color-active: var(--sam3-color-accent);
+    --link-text-color-visited: var(--sam3-color-accent-hover);
+    --code-background-fill: var(--sam3-color-paper-3);
+    --stat-background-fill: var(--sam3-color-paper-3);
+    --table-border-color: var(--sam3-color-rule);
+    --table-even-background-fill: var(--sam3-color-paper-2);
+    --table-odd-background-fill: var(--sam3-color-paper-3);
+    --table-row-focus: var(--sam3-color-accent-subtle);
+    --table-text-color: var(--sam3-color-ink);
+    --error-background-fill: var(--sam3-color-accent-subtle);
+    --error-border-color: var(--sam3-color-error);
+    --error-text-color: var(--sam3-color-error-hover);
+
+    --radius-xs: var(--sam3-radius-xs);
+    --radius-sm: var(--sam3-radius-sm);
+    --radius-md: var(--sam3-radius-md);
+    --radius-lg: var(--sam3-radius-md);
+    --radius-xl: var(--sam3-radius-lg);
+    --block-radius: var(--sam3-radius-md);
+    --button-large-radius: var(--sam3-radius-md);
+    --button-small-radius: var(--sam3-radius-sm);
+    --checkbox-border-radius: var(--sam3-radius-xs);
+    --container-radius: var(--sam3-radius-lg);
+    --embed-radius: var(--sam3-radius-md);
+    --input-radius: var(--sam3-radius-md);
+    --table-radius: var(--sam3-radius-md);
+
+    --block-shadow: none;
+    --block-label-shadow: none;
+    --checkbox-shadow: none;
+    --checkbox-label-shadow: none;
+    --shadow-drop: 0 var(--sam3-space-2xs) var(--sam3-space-sm) var(--sam3-color-shadow);
+    --shadow-drop-lg: 0 var(--sam3-space-xs) var(--sam3-space-lg) var(--sam3-color-shadow);
+}

@@ -8,9 +8,14 @@ import torch
 
 from sam3ext.guidance.cns import color_noise_wavelet
 from sam3ext.guidance.cwm_smc import (
+    SMC_PRESETS,
+    SMC_PRESET_NAMES,
     apply_cwm_error,
     apply_smc_error,
     compose_cfg,
+    detect_smc_preset,
+    normalize_smc_preset,
+    resolve_smc_preset,
 )
 from sam3ext.guidance.dave import apply_dave
 from sam3ext.guidance.dcw import apply_dcw
@@ -113,6 +118,57 @@ class GuidanceMathTests(unittest.TestCase):
 
         self.assertTrue(torch.isfinite(out).all())
         self.assertTrue(torch.isfinite(state).all())
+
+    def test_smc_presets_match_comfyui_dcw(self):
+        self.assertEqual(
+            SMC_PRESET_NAMES,
+            (
+                "Off",
+                "Auto",
+                "SD1.5 / SD2",
+                "SDXL",
+                "SD3 / SD3.5",
+                "Flux",
+                "Qwen-Image",
+                "Cosmos / Wan",
+                "Custom",
+            ),
+        )
+        self.assertEqual(SMC_PRESETS["Flux"], (6.0, 0.70))
+        self.assertEqual(SMC_PRESETS["Cosmos / Wan"], (6.0, 0.20))
+
+    def test_smc_auto_detects_forge_anima_as_cosmos(self):
+        Anima = type("Anima", (), {})
+
+        requested, concrete, lambda_value, k_value = resolve_smc_preset(
+            "Auto", Anima()
+        )
+
+        self.assertEqual(requested, "Auto")
+        self.assertEqual(concrete, "Cosmos / Wan")
+        self.assertEqual((lambda_value, k_value), (6.0, 0.20))
+
+    def test_smc_auto_detection_covers_named_and_model_type_fallbacks(self):
+        QwenImage = type("QwenImage", (), {})
+        UnknownFlow = type("UnknownModel", (), {"model_type": "flow"})
+
+        self.assertEqual(detect_smc_preset(QwenImage()), "Qwen-Image")
+        self.assertEqual(detect_smc_preset(UnknownFlow()), "SD3 / SD3.5")
+        self.assertEqual(detect_smc_preset(object()), "SD1.5 / SD2")
+
+    def test_smc_custom_and_off_resolution(self):
+        self.assertEqual(normalize_smc_preset("custom"), "Custom")
+        self.assertEqual(normalize_smc_preset("not-a-preset"), "Off")
+        self.assertEqual(
+            resolve_smc_preset(
+                "Custom", custom_lambda=7.5, custom_k=0.35
+            ),
+            ("Custom", "Custom", 7.5, 0.35),
+        )
+        self.assertEqual(
+            resolve_smc_preset("Off"),
+            ("Off", "Off", 0.0, 0.0),
+        )
 
     def test_smc_and_cwm_zero_nonfinite_values_like_reference(self):
         error = torch.tensor([[[[float("nan"), float("inf"), -float("inf")]]]])

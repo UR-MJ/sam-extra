@@ -6,6 +6,7 @@ import types
 import unittest
 from pathlib import Path
 
+import gradio as gr
 import torch
 
 
@@ -785,6 +786,23 @@ class AnimaSafePagTests(unittest.TestCase):
             "mod_enabled, mod_clip_model, mod_weight",
             source,
         )
+        self.assertIn("anima_guidance_smc_preset", source)
+        self.assertIn('"[Anima SMC] Preset"', source)
+        self.assertIn('_arg(56, "Off")', source)
+        self.assertIn(
+            "mod_adapter_mode, mod_adapter_path,\n"
+            "            # Appended after v0.20 to preserve all 56 older argument indexes.\n"
+            "            smc_preset,",
+            source,
+        )
+        self.assertLess(
+            source.index('gr.Markdown("#### DCW — post-CFG'),
+            source.index('gr.Markdown("#### CWM — CFG wavelet'),
+        )
+        self.assertLess(
+            source.index('gr.Markdown("#### CWM — CFG wavelet'),
+            source.index('gr.Markdown("#### SMC — sliding-mode'),
+        )
         self.assertNotIn(
             'with gr.Accordion("DCW (post-CFG wavelet correction)"',
             source,
@@ -796,6 +814,174 @@ class AnimaSafePagTests(unittest.TestCase):
         self.assertNotIn(
             'with gr.Accordion("CNS-inspired Wavelet Noise',
             source,
+        )
+
+    def test_guidance_ui_builds_with_append_only_smc_preset_argument(self):
+        with gr.Blocks():
+            inputs = self.pag.AnimaSafePAG().ui(False)
+
+        self.assertEqual(len(inputs), 57)
+        self.assertEqual(inputs[26].elem_id, "anima_guidance_smc_lambda")
+        self.assertEqual(inputs[26].maximum, 30.0)
+        self.assertEqual(inputs[27].elem_id, "anima_guidance_smc_k")
+        self.assertEqual(inputs[27].maximum, 5.0)
+        self.assertEqual(inputs[42].elem_id, "anima_guidance_smc_enable")
+        self.assertEqual(inputs[56].elem_id, "anima_guidance_smc_preset")
+        self.assertEqual(inputs[56].value, "Off")
+
+    def test_xyz_axis_labels_are_append_only(self):
+        """xyz_grid stores a chosen axis by its integer index in axis_options.
+
+        Reordering the list therefore repoints every saved grid at a different
+        control, exactly like shuffling the script-arg list would. The v0.20
+        order must stay an unbroken prefix, with new axes appended.
+        """
+        registered = []
+
+        class FakeAxisOption:
+            def __init__(self, label, *args, **kwargs):
+                self.label = label
+
+        fake_xyz = types.SimpleNamespace(
+            AxisOption=FakeAxisOption,
+            axis_options=registered,
+        )
+        fake_entry = types.SimpleNamespace(
+            script_class=types.SimpleNamespace(__module__="xyz_grid.py"),
+            module=fake_xyz,
+        )
+        original = self.pag.scripts.scripts_data
+        self.pag.scripts.scripts_data = [fake_entry]
+        try:
+            self.pag._make_pag_xyz_axis()
+        finally:
+            self.pag.scripts.scripts_data = original
+
+        labels = [option.label for option in registered]
+        expected_prefix = [
+            "[Anima Pert] Enable",
+            "[Anima Pert] Attn Method",
+            "[Anima Pert] Attn Scale",
+            "[Anima Pert] Perturbation Strength",
+            "[Anima Pert] Legacy Soft/Approx",
+            "[Anima Pert] Legacy Perturbation Strength",
+            "[Anima Pert] SEG Blur Sigma",
+            "[Anima Pert] Attn Block Indices",
+            "[Anima Pert] Attn Head Indices",
+            "[Anima Pert] SLG Enable",
+            "[Anima Pert] SLG Scale",
+            "[Anima Pert] SLG Block Indices",
+            "[Anima Pert] Start Percent",
+            "[Anima Pert] End Percent",
+            "[Anima Pert] Rescale",
+            "[Anima Pert] Rescale Mode",
+            "[Anima APG] Enable",
+            "[Anima APG] Eta",
+            "[Anima APG] Norm Threshold",
+            "[Anima APG] Momentum",
+            "[Anima AdaptiveG] Enable",
+            "[Anima AdaptiveG] Skip After",
+            "[Anima AdaptiveG] Keep Every",
+            "[Anima CFG] Base Mode",
+            "[Anima CFG] Experimental Stack",
+            "[Anima CWM] Enable",
+            "[Anima CWM] Alpha Low",
+            "[Anima CWM] Alpha High",
+            "[Anima SMC] Enable",
+            "[Anima SMC] Lambda",
+            "[Anima SMC] K",
+            "[Anima DCW] Enable",
+            "[Anima DCW] Lambda Low",
+            "[Anima DCW] Lambda High",
+            "[Anima DAVE] Enable",
+            "[Anima DAVE] Strength",
+            "[Anima DAVE] Tau",
+            "[Anima DAVE] Block Indices",
+            "[Anima CNS] Enable",
+            "[Anima CNS] Strength",
+            "[Anima CNS] Gamma Power",
+            "[Anima CNS] Gamma Scale",
+            "[Anima Mod] Enable",
+            "[Anima Mod] Direction Weight",
+            "[Anima Mod] Start Block",
+            "[Anima Mod] End Block",
+        ]
+        self.assertEqual(labels[:len(expected_prefix)], expected_prefix)
+        self.assertIn("[Anima SMC] Preset", labels[len(expected_prefix):])
+
+    def test_smc_auto_resolves_on_real_process_argument_path(self):
+        class DummyUnet:
+            def __init__(self):
+                self.post_cfg = None
+
+            def clone(self):
+                return DummyUnet()
+
+            def set_model_sampler_post_cfg_function(self, function):
+                self.post_cfg = function
+
+        Anima = type("Anima", (), {})
+        model = Anima()
+        model.forge_objects = types.SimpleNamespace(unet=DummyUnet())
+        request = types.SimpleNamespace(
+            sd_model=model,
+            extra_generation_params={},
+            steps=20,
+        )
+        process = self.pag.AnimaSafePAG()
+        with gr.Blocks():
+            inputs = process.ui(False)
+        args = [component.value for component in inputs]
+        args[56] = "Auto"
+
+        process.process_before_every_sampling(request, *args)
+
+        self.assertTrue(self.pag._CFG["smc_on"])
+        self.assertEqual(self.pag._CFG["smc_preset"], "Auto")
+        self.assertEqual(
+            self.pag._CFG["smc_resolved_preset"], "Cosmos / Wan"
+        )
+        self.assertEqual(
+            (self.pag._CFG["smc_lambda"], self.pag._CFG["smc_k"]),
+            (6.0, 0.20),
+        )
+        self.assertIsNotNone(request.sd_model.forge_objects.unet.post_cfg)
+        self.assertIn(
+            "smc=Auto→Cosmos / Wan(6,0.2)",
+            request.extra_generation_params["Anima CFG Orchestrator"],
+        )
+
+    def test_legacy_short_smc_call_keeps_historical_omitted_k_default(self):
+        class DummyUnet:
+            def clone(self):
+                return DummyUnet()
+
+            def set_model_sampler_post_cfg_function(self, function):
+                self.post_cfg = function
+
+        Anima = type("Anima", (), {})
+        model = Anima()
+        model.forge_objects = types.SimpleNamespace(unet=DummyUnet())
+        request = types.SimpleNamespace(
+            sd_model=model,
+            extra_generation_params={},
+            steps=20,
+        )
+        process = self.pag.AnimaSafePAG()
+        with gr.Blocks():
+            inputs = process.ui(False)
+        # v0.20 and older callers can stop before index 27. Selecting the
+        # legacy SMC radio must retain that contract's old k=0.20 fallback.
+        args = [component.value for component in inputs[:27]]
+        args[22] = "SMC"
+
+        process.process_before_every_sampling(request, *args)
+
+        self.assertTrue(self.pag._CFG["smc_on"])
+        self.assertEqual(self.pag._CFG["smc_preset"], "Custom")
+        self.assertEqual(
+            (self.pag._CFG["smc_lambda"], self.pag._CFG["smc_k"]),
+            (6.0, 0.20),
         )
 
     def test_guidance_ui_exposes_per_control_adjustment_hints(self):

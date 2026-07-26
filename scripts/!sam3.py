@@ -27,12 +27,12 @@ from sam3ext import SAM3_NAME, Sam3Args, __version__, run_sam3_on_pil
 from sam3ext.anima_core import anima_available
 from sam3ext.core import find_checkpoint_options, unload_sam3, write_artifacts
 from sam3ext.inpaint_core import apply_prompt_sr, copy_prompt, run_inpaint_passes
-from sam3ext.live_workspace_route import register_live_workspace_route
+from sam3ext.notebook_store import register_notebook_routes
 from sam3ext.ui import WebuiButtons, sam3_ui
 from sam3ext.ui_anima import AnimaPanel, build_anima_panel, handle_anima_click
 from sam3ext.ui_refine import RefinePanel, _pull_seed_from_gallery_item, build_refine_panel, handle_refine_click
 try:
-    from sam3ext.workspace_guard import (
+    from sam3ext.sampler_load_guard import (
         guard_sampler_app_started_callbacks,
         prune_stale_sampler_load_targets,
     )
@@ -40,11 +40,11 @@ except ImportError:
     # Forge can reload extension scripts without restarting Python. Reload this
     # helper too when an older cached module predates a newly-added guard.
     import importlib
-    import sam3ext.workspace_guard as _workspace_guard
+    import sam3ext.sampler_load_guard as _sampler_load_guard
 
-    _workspace_guard = importlib.reload(_workspace_guard)
-    guard_sampler_app_started_callbacks = _workspace_guard.guard_sampler_app_started_callbacks
-    prune_stale_sampler_load_targets = _workspace_guard.prune_stale_sampler_load_targets
+    _sampler_load_guard = importlib.reload(_sampler_load_guard)
+    guard_sampler_app_started_callbacks = _sampler_load_guard.guard_sampler_app_started_callbacks
+    prune_stale_sampler_load_targets = _sampler_load_guard.prune_stale_sampler_load_targets
 
 
 txt2img_submit_button = img2img_submit_button = None
@@ -186,42 +186,10 @@ def make_axis_on_xyz_grid():
         xyz_grid.axis_options.extend(axis)
 
 
-WORKSPACE_MODE_LIVE = "Live Workspace"
-WORKSPACE_MODE_PLAIN = "기본 Forge UI"
-
-
-def workspace_live_enabled() -> bool:
-    """True when Live Workspace mode is selected (the default)."""
-    mode = getattr(shared.opts, "sam3_workspaces_mode", WORKSPACE_MODE_LIVE)
-    return str(mode or WORKSPACE_MODE_LIVE) != WORKSPACE_MODE_PLAIN
-
-
-def on_ui_settings_workspaces():
-    # Feature 5 mode selector. The frontend redirects a bare "/" to the
-    # lightweight "/sam3-live" shell only when Live Workspace is selected;
-    # picking "기본 Forge UI" keeps the plain, untouched Forge txt2img page
-    # (no workspace shell, no toolbar). Read server-side by the /sam3-live/enabled
-    # probe so the choice applies before window.opts is populated.
-    section = ("sam3_workspaces", "SAM3 Workspaces")
-    shared.opts.add_option(
-        "sam3_workspaces_mode",
-        shared.OptionInfo(
-            WORKSPACE_MODE_LIVE,
-            "txt2img 작업공간 모드 (기능 5 · 새로고침 후 적용)",
-            gr.Radio,
-            {"choices": [WORKSPACE_MODE_LIVE, WORKSPACE_MODE_PLAIN]},
-            section=section,
-        ),
-    )
-
-
-script_callbacks.on_ui_settings(on_ui_settings_workspaces)
-
-
 def on_before_ui():
     guarded = guard_sampler_app_started_callbacks(script_callbacks.callback_map)
     if guarded:
-        print(f"[SAM3 Workspaces] guarded sampler app-start callbacks: {guarded}")
+        print(f"[SAM3] guarded sampler app-start callbacks: {guarded}")
     try:
         make_axis_on_xyz_grid()
     except Exception:
@@ -232,24 +200,24 @@ def on_before_ui():
 script_callbacks.on_before_ui(on_before_ui)
 
 
-def on_app_started_workspace_guard(demo, app):
-    if register_live_workspace_route(app):
-        print("[SAM3 Workspaces] lightweight shell: /sam3-live")
+def on_app_started_services(demo, app):
+    if register_notebook_routes(app):
+        print("[SAM3 Notebook] storage API: /sam3-notebook")
     guarded = guard_sampler_app_started_callbacks(script_callbacks.callback_map)
     if guarded:
-        print(f"[SAM3 Workspaces] guarded late sampler app-start callbacks: {guarded}")
+        print(f"[SAM3] guarded late sampler app-start callbacks: {guarded}")
     removed = prune_stale_sampler_load_targets(demo)
     total = sum(removed.values())
     if total:
         print(
-            "[SAM3 Workspaces] removed stale sampler page-load targets: "
+            "[SAM3] removed stale sampler page-load targets: "
             f"RK={removed['rk']}, TDE={removed['tde']}"
         )
 
 
 script_callbacks.on_app_started(
-    on_app_started_workspace_guard,
-    name="workspace-sampler-load-guard",
+    on_app_started_services,
+    name="notebook-and-sampler-load-guard",
 )
 
 

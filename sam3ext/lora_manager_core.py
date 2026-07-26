@@ -922,10 +922,9 @@ def _read_log_tail(n: int = 20) -> str:
 # ---------------------------------------------------------------------------
 # HTTP config/spawn endpoints
 # ---------------------------------------------------------------------------
-# The Live Workspace shell is a lightweight page with no Gradio doc, so it
-# cannot click the hidden bridge buttons the normal txt2img UI uses. These
-# same-origin JSON routes let the shell (or any page) query config and lazily
-# spawn the server directly. They wrap the exact same get_or_spawn() lifecycle.
+# Same-origin JSON routes let the embedded manager query config and lazily
+# spawn its server without coupling that lifecycle to a hidden Gradio button.
+# They wrap the exact same get_or_spawn() lifecycle.
 
 LORA_CONFIG_PATH = "/sam3-lora/config"
 LORA_SPAWN_PATH = "/sam3-lora/spawn"

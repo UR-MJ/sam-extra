@@ -1,437 +1,883 @@
-.sam3-workspace-restoring {
-    pointer-events: none;
-    user-select: none;
+/* Hallmark · pre-emit critique: P5 H4 E5 S5 R5 V4
+ * genre: atmospheric · macrostructure: Workbench
+ * tone: technical · anchor hues: ember / violet / amber / low-chroma neutral
+ * design-system: design.md · designed-as-app
+ * contrast: pass (40–41) · slop: pass (component scope)
+ */
+@import url("./tokens.css");
+
+/* -------------------------------------------------------------------------
+ * SAM Extra appearance themes — extension-only Gradio presentation layer.
+ * ---------------------------------------------------------------------- */
+
+:is(html, body)[data-sam3-theme] {
+    overflow-x: clip;
+    color: var(--sam3-color-ink);
+    background: var(--sam3-color-paper);
+    font-family: var(--sam3-font-body);
+    scrollbar-color: var(--sam3-color-rule) var(--sam3-color-paper);
+}
+
+[data-sam3-theme] :where(.gradio-container) {
+    color: var(--sam3-color-ink);
+    background: var(--sam3-color-paper) !important;
+    font-family: var(--sam3-font-body);
+}
+
+[data-sam3-theme] :where(
+    input,
+    textarea,
+    select,
+    button,
+    .gradio-dropdown,
+    .gradio-number
+) {
+    font-variant-numeric: tabular-nums;
+}
+
+[data-sam3-theme] :where(button, [role="button"]) {
+    border-radius: var(--sam3-radius-md);
+    white-space: nowrap;
+}
+
+[data-sam3-theme] :where(
+    button,
+    input,
+    textarea,
+    select,
+    [role="button"],
+    [role="tab"],
+    [tabindex]
+):focus-visible {
+    outline: 2px solid var(--sam3-color-focus) !important;
+    outline-offset: 2px;
+    box-shadow: none !important;
+}
+
+[data-sam3-theme] :where(button, [role="button"]):active {
+    transform: translateY(1px);
+}
+
+[data-sam3-theme] :where(
+    button:disabled,
+    input:disabled,
+    textarea:disabled,
+    select:disabled,
+    [aria-disabled="true"]
+) {
+    cursor: not-allowed !important;
+    opacity: .52;
+}
+
+[data-sam3-theme] :where(
+    [aria-busy="true"],
+    .pending,
+    .generating
+) {
+    cursor: progress;
+}
+
+[data-sam3-theme] :where(
+    input,
+    textarea,
+    select
+)[aria-invalid="true"] {
+    border-color: var(--sam3-color-error) !important;
+    outline: 2px solid var(--sam3-color-error) !important;
+    outline-offset: 1px;
+}
+
+[data-sam3-theme] :where(
+    input,
+    textarea,
+    select
+)[data-state="success"] {
+    border-color: var(--sam3-color-success) !important;
+}
+
+[data-sam3-theme] :where(.tab-nav) {
+    gap: var(--sam3-space-2xs);
+    border-bottom: 1px solid var(--sam3-color-rule);
+    background: transparent;
+}
+
+[data-sam3-theme] :where(.tab-nav > button) {
+    border: 1px solid transparent !important;
+    border-radius: var(--sam3-radius-sm) var(--sam3-radius-sm) 0 0;
+    color: var(--sam3-color-muted) !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+[data-sam3-theme] :where(.tab-nav > button.selected) {
+    border-color: var(--sam3-color-rule) !important;
+    border-bottom-color: var(--sam3-color-accent) !important;
+    color: var(--sam3-color-ink) !important;
+    background: var(--sam3-color-paper-3) !important;
+}
+
+[data-sam3-theme] :where(.gradio-accordion, .gradio-group, .gradio-panel) {
+    box-shadow: none !important;
+}
+
+@media (hover: hover) and (pointer: fine) {
+    [data-sam3-theme] :where(.tab-nav > button):hover {
+        color: var(--sam3-color-ink) !important;
+        background: var(--sam3-color-paper-2) !important;
+    }
+}
+
+/*
+ * The custom palettes remove Notebook's four nested card boundaries while
+ * Forge Default preserves the legacy presentation for an exact fallback.
+ */
+[data-sam3-theme] #sam3_notebook_panel {
+    border: 0;
+    border-top: 1px solid var(--sam3-color-rule);
+    border-radius: 0;
+    background: transparent;
+}
+
+[data-sam3-theme] .sam3-notebook-column {
+    padding-inline: var(--sam3-space-2xs);
+    border: 0;
+    border-top: 1px solid var(--sam3-color-rule);
+    border-radius: 0;
+    background: transparent;
+}
+
+[data-sam3-theme] .sam3-notebook-preset {
+    border: 0;
+    border-top: 1px solid var(--sam3-color-rule-2);
+    border-radius: 0;
+    background: transparent;
+}
+
+[data-sam3-theme] .sam3-notebook-entry {
+    border: 0;
+    border-top: 1px solid var(--sam3-color-rule-2);
+    border-radius: 0;
+    background: var(--sam3-color-paper-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    [data-sam3-theme] :where(button, [role="button"]):active {
+        transform: none;
+    }
 }
 
 /* -------------------------------------------------------------------------
- * Live Workspaces — up to 20 persistent WebUI documents, loaded on demand.
+ * SAM3 Notebook — single Forge document, three-column txt2img layout.
  * ---------------------------------------------------------------------- */
 
-html.sam3-live-shell-active,
-html.sam3-live-shell-active body {
-    overflow: hidden !important;
-}
-
-html.sam3-live-shell-active body > :not(#sam3_live_workspace_shell) {
-    visibility: hidden !important;
-}
-
-#sam3_live_workspace_shell {
-    position: fixed;
-    inset: 0;
-    z-index: 100000;
-    display: grid;
-    grid-template-rows: auto minmax(0, 1fr);
-    color: var(--body-text-color, #e7eaf0);
-    background: var(--body-background-fill, #080d17);
-}
-
-.sam3-live-header {
-    display: flex;
-    align-items: center;
-    gap: .65rem;
-    min-height: 46px;
-    padding: .4rem .65rem;
-    border-bottom: 1px solid var(--border-color-primary, #334155);
-    background: var(--background-fill-secondary, #101827);
-}
-
-.sam3-live-tabs {
-    display: flex;
-    flex: 1 1 auto;
-    min-width: 0;
-    gap: .35rem;
-    overflow-x: auto;
-    scrollbar-width: thin;
-}
-
-.sam3-live-tabs button,
-.sam3-live-header > button,
-.sam3-live-menu > summary,
-.sam3-live-menu-panel button,
-.sam3-live-menu-panel > label.sam3-live-import {
-    min-width: 2.6rem;
-    padding: .35rem .7rem;
-    border: 1px solid var(--border-color-primary, #475569);
-    border-radius: .45rem;
-    color: inherit;
-    background: var(--button-secondary-background-fill, #1e293b);
-    cursor: pointer;
-}
-
-.sam3-live-brand {
-    display: inline-flex;
-    align-items: center;
-    gap: .45rem;
-    white-space: nowrap;
-}
-
-.sam3-live-brand > span {
-    color: var(--color-accent, #fb923c);
-    font-size: 1rem;
-    font-weight: 800;
-    line-height: 1;
-}
-
-.sam3-live-brand:hover,
-.sam3-live-brand:focus-visible {
-    border-color: var(--color-accent, #f97316);
-}
-
-.sam3-live-tabs button.active {
-    border-color: var(--color-accent, #f97316);
-    background: var(--button-primary-background-fill, #ea580c);
-}
-
-.sam3-live-note {
-    flex: 0 0 auto;
-    opacity: .72;
-    font-size: .82rem;
-    white-space: nowrap;
-}
-
-.sam3-live-status {
-    flex: 0 1 18rem;
-    min-width: 0;
-    overflow: hidden;
-    color: var(--body-text-color-subdued, #94a3b8);
-    font-size: .78rem;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.sam3-live-status[data-tone="saved"] {
-    color: var(--color-accent, #fb923c);
-}
-
-.sam3-live-status[data-tone="warning"],
-.sam3-live-status[data-tone="error"] {
-    color: var(--error-text-color, #f87171);
-}
-
-.sam3-live-menu {
-    position: relative;
-    flex: 0 0 auto;
-}
-
-.sam3-live-menu > summary {
-    display: grid;
-    place-items: center;
-    min-width: 2.6rem;
-    list-style: none;
-    user-select: none;
-}
-
-.sam3-live-menu > summary::-webkit-details-marker {
-    display: none;
-}
-
-.sam3-live-menu[open] > summary {
-    border-color: var(--color-accent, #f97316);
-}
-
-.sam3-live-menu-panel {
-    position: absolute;
-    top: calc(100% + .45rem);
-    right: 0;
-    z-index: 10;
-    display: grid;
-    width: min(19rem, 80vw);
-    gap: .45rem;
-    padding: .65rem;
-    border: 1px solid var(--border-color-primary, #475569);
-    border-radius: .55rem;
-    background: var(--background-fill-secondary, #101827);
-    box-shadow: 0 .7rem 2rem rgba(0, 0, 0, .35);
-}
-
-.sam3-live-menu-panel > label:not(.sam3-live-import) {
-    display: grid;
-    gap: .3rem;
-    font-size: .78rem;
-}
-
-.sam3-live-menu-panel input[type="text"] {
-    box-sizing: border-box;
-    width: 100%;
-    min-width: 0;
-    padding: .4rem .5rem;
-    border: 1px solid var(--border-color-primary, #475569);
-    border-radius: .4rem;
-    color: inherit;
-    background: var(--input-background-fill, #0f172a);
-}
-
-.sam3-live-menu-panel > label.sam3-live-import {
-    display: block;
-    text-align: center;
-}
-
-.sam3-live-menu-panel button.sam3-live-delete {
-    border-color: color-mix(in srgb, var(--error-text-color, #f87171) 65%, transparent);
-    color: var(--error-text-color, #f87171);
-}
-
-.sam3-live-menu-panel button.sam3-live-delete:hover,
-.sam3-live-menu-panel button.sam3-live-delete:focus-visible {
-    background: color-mix(in srgb, var(--error-background-fill, #7f1d1d) 55%, transparent);
-}
-
-.sam3-live-menu-panel input[type="file"] {
-    display: none;
-}
-
-.sam3-live-frames,
-.sam3-live-frames iframe {
-    width: 100%;
-    height: 100%;
-    min-width: 0;
-    min-height: 0;
-    border: 0;
-    background: var(--body-background-fill, #080d17);
-}
-
-.sam3-live-frames {
-    position: relative;
-    display: grid;
-    overflow: hidden;
-}
-
-.sam3-live-frames iframe {
-    grid-area: 1 / 1;
-    z-index: 0;
-    visibility: hidden;
-    opacity: 0;
-    pointer-events: none;
-}
-
-.sam3-live-frames iframe[data-active="true"] {
-    z-index: 1;
-    visibility: visible;
-    opacity: 1;
-    pointer-events: auto;
-}
-
-.sam3-live-loading {
-    position: absolute;
-    inset: 0;
-    z-index: 2;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: .75rem;
-    padding: 1rem;
-    color: var(--body-text-color, #e7eaf0);
-    background: var(--body-background-fill, #080d17);
-    font-size: .95rem;
-    pointer-events: none;
-}
-
-.sam3-live-loading[hidden] {
-    display: none !important;
-}
-
-.sam3-live-spinner {
-    width: 1.15rem;
-    height: 1.15rem;
-    border: 2px solid color-mix(in srgb, currentColor 25%, transparent);
-    border-top-color: var(--color-accent, #f97316);
-    border-radius: 50%;
-    animation: sam3-live-spin .8s linear infinite;
-}
-
-@keyframes sam3-live-spin {
-    to { transform: rotate(360deg); }
-}
-
-/* Shared LoRA Manager overlay in the Live shell (one manager for all
- * workspaces; "Add LoRA" routes to the active workspace's prompt). */
-.sam3-live-lora-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 100001;
-    display: grid;
-    grid-template-rows: auto minmax(0, 1fr);
-    background: var(--body-background-fill, #080d17);
-}
-
-.sam3-live-lora-overlay[hidden] {
-    display: none !important;
-}
-
-.sam3-live-lora-bar {
-    display: flex;
-    align-items: center;
-    gap: .6rem;
-    min-height: 46px;
-    padding: .4rem .65rem;
-    border-bottom: 1px solid var(--border-color-primary, #334155);
-    background: var(--background-fill-secondary, #101827);
-}
-
-.sam3-live-lora-bar > strong {
-    flex: 0 0 auto;
-    color: var(--color-accent, #fb923c);
-}
-
-.sam3-live-lora-status,
-.sam3-live-lora-active {
-    min-width: 0;
-    overflow: hidden;
-    color: var(--body-text-color-subdued, #94a3b8);
-    font-size: .8rem;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.sam3-live-lora-bar > [data-sam3-live-lora-close] {
-    flex: 0 0 auto;
-    margin-left: auto;
-    min-width: 2.2rem;
-    padding: .3rem .65rem;
-    border: 1px solid var(--border-color-primary, #475569);
-    border-radius: .45rem;
-    color: inherit;
-    background: var(--button-secondary-background-fill, #1e293b);
-    cursor: pointer;
-}
-
-.sam3-live-lora-frame {
-    width: 100%;
-    height: 100%;
-    min-height: 0;
-    border: 0;
-    background: var(--body-background-fill, #080d17);
-}
-
-html.sam3-live-frame-active body {
+html.sam3-notebook-layout-active body {
     margin: 0 !important;
     overflow: auto !important;
 }
 
-html.sam3-live-frame-active .sam3-live-original-root {
+html.sam3-notebook-layout-active .sam3-notebook-original-root {
     display: none !important;
 }
 
-#sam3_live_child_layout {
+#sam3_notebook_layout {
     box-sizing: border-box;
     width: 100%;
     min-height: 100vh;
     padding: .55rem;
-    color: var(--body-text-color, #e7eaf0);
-    background: var(--body-background-fill, #080d17);
+    color: var(--body-text-color, var(--sam3-color-ink));
+    background: var(--body-background-fill, var(--sam3-color-paper));
 }
 
-.sam3-native-workspace-bar {
-    display: flex;
-    align-items: center;
-    gap: .65rem;
-    min-width: 0;
+.sam3-notebook-prompt {
     margin-bottom: .55rem;
-    padding: .4rem .6rem;
-    border: 1px solid var(--border-color-primary, #334155);
-    border-radius: .5rem;
-    color: var(--body-text-color, #e7eaf0);
-    background: var(--background-fill-secondary, #101827);
 }
 
-/* Relocated Forge extra-network tabs (Generation / Textual Inversion /
-   Checkpoints / Lora). The Generation tab keeps its strip but its body is
-   empty here, because Parameters and Gallery own those nodes now. */
-#sam3_live_child_layout .sam3-live-extra-tabs {
-    margin-top: .5rem;
+.sam3-notebook-prompt-compact {
+    display: grid;
+    grid-template-columns: minmax(0, 6fr) minmax(12rem, 1fr);
+    gap: .5rem;
+    align-items: start;
 }
 
-#sam3_live_child_layout .sam3-live-extra-tabs > .tabitem:empty {
-    display: none;
+.sam3-notebook-prompt-compact > #txt2img_prompt_container {
+    grid-column: 1;
+    grid-row: 1;
 }
 
-.sam3-native-workspace-bar > strong {
-    flex: 0 0 auto;
-    color: var(--color-accent, #fb923c);
+.sam3-notebook-prompt-compact > #txt2img_generate_box {
+    grid-column: 2;
+    grid-row: 1;
 }
 
-.sam3-native-workspace-bar > span:not(.sam3-native-workspace-status) {
-    flex: 0 0 auto;
-    color: var(--body-text-color-subdued, #94a3b8);
-    font-size: .8rem;
+.sam3-notebook-prompt-compact > .toprow-compact-stylerow {
+    grid-column: 1;
+    grid-row: 2;
 }
 
-.sam3-native-workspace-status {
+.sam3-notebook-columns {
+    display: grid;
+    grid-template-columns:
+        minmax(300px, 1.05fr)
+        minmax(300px, .95fr)
+        minmax(340px, 1.1fr);
+    gap: .55rem;
+    align-items: start;
+    position: relative;
+}
+
+.sam3-notebook-column {
+    min-width: 0;
+    padding: .5rem;
+    border: 1px solid var(--border-color-primary, var(--sam3-color-rule));
+    border-radius: .55rem;
+    background: var(--background-fill-secondary, var(--sam3-color-paper-2));
+}
+
+.sam3-notebook-column > div {
+    min-width: 0;
+}
+
+.sam3-notebook-floating-script-owner {
+    position: relative !important;
+    overflow: visible !important;
+}
+
+/*
+ * No z-index here on purpose. An integer z-index makes each float a stacking
+ * context, and a Gradio popup rendered inside one stays trapped at that level:
+ * ul.options is position:fixed, which escapes overflow clipping but not an
+ * ancestor stacking context, so it would be capped at 3 instead of Forge's
+ * z-index:3000 and the next float would paint and hit-test over it. DOM order
+ * already paints these positioned floats above the column background.
+ */
+.sam3-notebook-script-float {
+    position: absolute !important;
+    max-width: none !important;
+    margin: 0 !important;
+}
+
+/* Hallmark · component: dropdown · genre: atmospheric · theme: design.md
+ * states: default · hover · focus · active · disabled · loading · error · success
+ * contrast: semantic token pairs
+ */
+.sam3-fast-dropdown-original {
+    display: none !important;
+}
+
+.sam3-fast-dropdown-proxy {
+    display: flex;
     flex: 1 1 auto;
+    flex-direction: column;
+    gap: var(--sam3-space-2xs, .25rem);
+    min-width: 0;
+    padding: var(--block-padding, .45rem);
+}
+
+.sam3-fast-dropdown-label {
+    color: var(--block-label-text-color, var(--body-text-color));
+    font-size: var(--block-label-text-size, .75rem);
+    line-height: 1.2;
+}
+
+.sam3-fast-dropdown-trigger {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) 1.25rem;
+    align-items: center;
+    width: 100%;
+    min-width: 0;
+    min-height: 2.75rem;
+    padding: 0 var(--sam3-space-xs, .5rem) !important;
+    color: var(--input-text-color, var(--body-text-color)) !important;
+    background: var(--input-background-fill, var(--background-fill-primary)) !important;
+    border: 1px solid var(--input-border-color, var(--border-color-primary)) !important;
+    border-radius: var(--input-radius, var(--sam3-radius-md, .375rem)) !important;
+    outline: 2px solid transparent;
+    outline-offset: 1px;
+    box-shadow: none !important;
+    font: inherit;
+    text-align: left;
+    transition:
+        background-color var(--sam3-dur-micro, 120ms) var(--sam3-ease-out),
+        color var(--sam3-dur-micro, 120ms) var(--sam3-ease-out),
+        transform var(--sam3-dur-micro, 120ms) var(--sam3-ease-out);
+}
+
+.sam3-fast-dropdown-value {
     min-width: 0;
     overflow: hidden;
-    color: var(--body-text-color-subdued, #94a3b8);
-    font-size: .78rem;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-.sam3-native-workspace-status[data-tone="saved"] {
-    color: var(--color-accent, #fb923c);
-}
-
-.sam3-native-workspace-status[data-tone="warning"],
-.sam3-native-workspace-status[data-tone="error"] {
-    color: var(--error-text-color, #f87171);
-}
-
-.sam3-native-workspace-bar > a {
-    flex: 0 0 auto;
-    padding: .3rem .55rem;
-    border: 1px solid var(--border-color-primary, #475569);
-    border-radius: .4rem;
-    color: inherit;
-    background: var(--button-secondary-background-fill, #1e293b);
-    text-decoration: none;
-}
-
-.sam3-live-prompt {
-    margin-bottom: .55rem;
-}
-
-.sam3-live-columns {
-    display: grid;
-    grid-template-columns: minmax(300px, 1.05fr) minmax(300px, .95fr) minmax(340px, 1.1fr);
-    gap: .55rem;
-    align-items: start;
-}
-
-.sam3-live-column {
-    min-width: 0;
-    padding: .5rem;
-    border: 1px solid var(--border-color-primary, #334155);
-    border-radius: .55rem;
-    background: var(--background-fill-secondary, #0d1421);
-}
-
-.sam3-live-column > div,
-.sam3-live-script-core {
-    min-width: 0;
-}
-
-.sam3-live-script-core {
+.sam3-fast-dropdown-multi-value {
     display: flex;
-    flex-direction: column;
-    gap: var(--layout-gap, .5rem);
+    flex-wrap: wrap;
+    gap: var(--sam3-space-2xs, .25rem);
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
 }
 
-.sam3-live-script-core > * {
+.sam3-fast-dropdown-chip {
+    display: inline-flex;
+    min-width: 0;
+    max-width: 100%;
+    align-items: center;
+    padding: .16rem .42rem;
+    overflow: hidden;
+    color: var(--body-text-color, var(--sam3-color-ink));
+    background: var(--sam3-color-accent-subtle, var(--background-fill-primary));
+    border: 1px solid var(--border-color-primary, var(--sam3-color-rule));
+    border-radius: var(--sam3-radius-sm, .25rem);
+    font-size: .78rem;
+    line-height: 1.25;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sam3-fast-dropdown-indicator {
+    display: grid;
+    width: 1.1rem;
+    height: 1.1rem;
+    place-items: center;
+    justify-self: end;
+    color: var(--body-text-color-subdued, var(--sam3-color-muted));
+}
+
+.sam3-fast-dropdown-indicator::before {
+    content: "⌄";
+    line-height: 1;
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .sam3-fast-dropdown-trigger:hover {
+        background: var(--input-background-fill-hover, var(--sam3-color-paper-4)) !important;
+    }
+
+    .sam3-fast-dropdown-option:hover {
+        color: var(--body-text-color, var(--sam3-color-ink)) !important;
+        background: var(--sam3-color-paper-4, var(--background-fill-secondary)) !important;
+    }
+}
+
+.sam3-fast-dropdown-trigger:focus-visible {
+    outline: 2px solid var(--sam3-color-focus, var(--border-color-accent)) !important;
+    outline-offset: 1px;
+}
+
+.sam3-fast-dropdown-trigger:active {
+    transform: translateY(1px);
+}
+
+.sam3-fast-dropdown-trigger:disabled,
+.sam3-fast-dropdown-proxy[aria-disabled="true"] {
+    cursor: not-allowed !important;
+    opacity: .55;
+}
+
+.sam3-fast-dropdown-proxy[data-state="loading"] .sam3-fast-dropdown-indicator::before {
+    content: "";
+    width: .75rem;
+    height: .75rem;
+    border: 2px solid var(--sam3-color-rule);
+    border-top-color: var(--sam3-color-accent);
+    border-radius: 50%;
+    animation: sam3-fast-dropdown-spin var(--sam3-dur-long, 420ms) linear infinite;
+}
+
+.sam3-fast-dropdown-proxy[data-state="error"] .sam3-fast-dropdown-trigger {
+    border-color: var(--sam3-color-error, var(--error-border-color)) !important;
+}
+
+.sam3-fast-dropdown-proxy[data-state="error"] .sam3-fast-dropdown-indicator::before {
+    content: "!";
+    color: var(--sam3-color-error, var(--error-text-color));
+    font-weight: 700;
+}
+
+.sam3-fast-dropdown-proxy[data-state="success"] .sam3-fast-dropdown-trigger {
+    border-color: var(--sam3-color-success, var(--border-color-accent)) !important;
+}
+
+.sam3-fast-dropdown-proxy[data-state="success"] .sam3-fast-dropdown-indicator::before {
+    content: "✓";
+    color: var(--sam3-color-success, var(--body-text-color));
+    font-weight: 700;
+}
+
+.sam3-fast-dropdown-status {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+.sam3-fast-dropdown-popover {
+    position: fixed;
+    inset: auto;
+    z-index: 100000;
+    box-sizing: border-box;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    gap: var(--sam3-space-2xs, .25rem);
+    margin: 0;
+    padding: var(--sam3-space-2xs, .25rem);
+    color: var(--body-text-color, var(--sam3-color-ink));
+    background: var(--background-fill-secondary, var(--sam3-color-paper-2));
+    border: 1px solid var(--border-color-primary, var(--sam3-color-rule));
+    border-radius: var(--sam3-radius-md, .375rem);
+    box-shadow: var(--shadow-drop, 0 .25rem .75rem var(--sam3-color-shadow));
+}
+
+.sam3-fast-dropdown-popover[data-open="false"] {
+    display: none;
+}
+
+.sam3-fast-dropdown-popover::backdrop {
+    background: transparent;
+}
+
+.sam3-fast-dropdown-search {
     width: 100%;
     min-width: 0;
+    min-height: 2.75rem;
+    padding: 0 var(--sam3-space-xs, .5rem);
+    color: var(--input-text-color, var(--body-text-color));
+    background: var(--input-background-fill, var(--background-fill-primary));
+    border: 1px solid var(--input-border-color, var(--border-color-primary));
+    border-radius: var(--input-radius, var(--sam3-radius-md, .375rem));
+    outline: 2px solid transparent;
+    outline-offset: 1px;
+    font: inherit;
 }
 
-.sam3-live-column > h2 {
+.sam3-fast-dropdown-search:focus-visible {
+    outline: 2px solid var(--sam3-color-focus, var(--border-color-accent));
+}
+
+.sam3-fast-dropdown-options {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-color: var(--sam3-color-rule) transparent;
+}
+
+.sam3-fast-dropdown-option {
+    display: block !important;
+    width: 100%;
+    min-height: 2.75rem;
+    padding: var(--sam3-space-2xs, .25rem) var(--sam3-space-xs, .5rem) !important;
+    color: var(--body-text-color-subdued, var(--sam3-color-ink-2)) !important;
+    background: transparent !important;
+    border: 0 !important;
+    border-left: 2px solid transparent !important;
+    border-radius: var(--sam3-radius-sm, .25rem) !important;
+    box-shadow: none !important;
+    text-align: left;
+    white-space: normal !important;
+}
+
+.sam3-fast-dropdown-option[aria-selected="true"] {
+    color: var(--body-text-color, var(--sam3-color-ink)) !important;
+    background: var(--sam3-color-accent-subtle, var(--background-fill-primary)) !important;
+    border-left-color: var(--sam3-color-accent, var(--border-color-accent)) !important;
+}
+
+.sam3-fast-dropdown-option:focus-visible {
+    outline: 2px solid var(--sam3-color-focus, var(--border-color-accent));
+    outline-offset: -2px;
+}
+
+.sam3-fast-dropdown-option:active {
+    transform: translateY(1px);
+}
+
+.sam3-fast-dropdown-option[hidden],
+.sam3-fast-dropdown-empty[hidden] {
+    display: none !important;
+}
+
+.sam3-fast-dropdown-empty {
+    min-height: 2.75rem;
+    margin: 0;
+    padding: var(--sam3-space-sm, .75rem);
+    color: var(--body-text-color-subdued, var(--sam3-color-muted));
+    text-align: center;
+}
+
+@keyframes sam3-fast-dropdown-spin {
+    to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .sam3-fast-dropdown-trigger,
+    .sam3-fast-dropdown-option {
+        transition: none;
+    }
+
+    .sam3-fast-dropdown-trigger:active,
+    .sam3-fast-dropdown-option:active {
+        transform: none;
+    }
+
+    .sam3-fast-dropdown-proxy[data-state="loading"] .sam3-fast-dropdown-indicator::before {
+        animation-duration: 1.2s;
+    }
+}
+
+.sam3-notebook-column > h2 {
     margin: 0 0 .45rem;
     font-size: .85rem;
     letter-spacing: .04em;
     opacity: .78;
 }
 
-@media (max-width: 1100px) {
-    .sam3-live-note { display: none; }
-    .sam3-native-workspace-bar > span:not(.sam3-native-workspace-status) {
-        display: none;
+/*
+ * Generation / Textual Inversion / Checkpoints / Lora own
+ * #txt2img_extra_tabs. Settings and Gallery must be extracted first, then the
+ * original Forge tab strip is restored below Prompt/Negative.
+ */
+#sam3_notebook_layout .sam3-notebook-extra-tabs {
+    margin-top: .5rem;
+}
+
+#sam3_notebook_layout .sam3-notebook-extra-tabs > .tabitem:empty {
+    display: none;
+}
+
+/*
+ * Forge keeps the results column sticky in its stock two-column layout. In
+ * this three-column layout Notebook follows that column in normal flow, so a
+ * sticky results panel would visually overlap Notebook and intercept its
+ * clicks (notably through SAM3 Refine's transparent accordion area).
+ */
+#sam3_notebook_layout [data-column="gallery"] #txt2img_results {
+    position: static !important;
+    top: auto !important;
+}
+
+/* -------------------------------------------------------------------------
+ * Notebook panel below Gallery.
+ * ---------------------------------------------------------------------- */
+
+#sam3_notebook_panel {
+    margin-top: .65rem;
+    border: 1px solid var(--border-color-primary, var(--sam3-color-rule));
+    border-radius: .55rem;
+    background: var(--background-fill-primary, var(--sam3-color-paper));
+    overflow: visible;
+}
+
+#sam3_notebook_panel > summary {
+    display: flex;
+    align-items: center;
+    gap: .45rem;
+    min-height: 2.55rem;
+    padding: .4rem .5rem;
+    list-style: none;
+    cursor: pointer;
+    user-select: none;
+}
+
+#sam3_notebook_panel > summary::-webkit-details-marker {
+    display: none;
+}
+
+#sam3_notebook_panel > summary::before {
+    content: "▶";
+    flex: 0 0 auto;
+    font-size: .68rem;
+    opacity: .7;
+    transform-origin: center;
+}
+
+#sam3_notebook_panel[open] > summary::before {
+    transform: rotate(90deg);
+}
+
+#sam3_notebook_panel > summary > strong {
+    flex: 0 0 auto;
+}
+
+.sam3-notebook-head-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: .4rem;
+    padding: 0 .5rem .4rem;
+}
+
+.sam3-notebook-status {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--body-text-color-subdued, var(--sam3-color-muted));
+    font-size: .76rem;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sam3-notebook-status[data-tone="saved"] {
+    color: var(--color-accent, var(--sam3-color-accent));
+}
+
+.sam3-notebook-status[data-tone="warning"],
+.sam3-notebook-status[data-tone="error"] {
+    color: var(--error-text-color, var(--sam3-color-error-hover));
+}
+
+#sam3_notebook_panel:not([open]) > .sam3-notebook-head-actions {
+    display: none !important;
+}
+
+#sam3_notebook_panel button,
+#sam3_notebook_panel .sam3-notebook-import {
+    box-sizing: border-box;
+    min-width: 2.25rem;
+    padding: .34rem .55rem;
+    border: 1px solid var(--border-color-primary, var(--sam3-color-rule));
+    border-radius: .4rem;
+    color: inherit;
+    background: var(--button-secondary-background-fill, var(--sam3-color-paper-3));
+    font: inherit;
+    line-height: 1.25;
+    cursor: pointer;
+}
+
+#sam3_notebook_panel button:hover,
+#sam3_notebook_panel button:focus-visible,
+#sam3_notebook_panel .sam3-notebook-import:hover {
+    border-color: var(--color-accent, var(--sam3-color-accent));
+}
+
+#sam3_notebook_panel button.primary {
+    border-color: var(--button-primary-border-color, var(--sam3-color-accent));
+    background: var(--button-primary-background-fill, var(--sam3-color-accent-strong));
+}
+
+#sam3_notebook_panel button.danger,
+#sam3_notebook_panel .danger {
+    color: var(--error-text-color, var(--sam3-color-error-hover));
+}
+
+.sam3-notebook-toolbar {
+    display: grid;
+    grid-template-columns: minmax(7rem, 1fr) auto auto;
+    gap: .4rem;
+    padding: 0 .5rem .5rem;
+}
+
+.sam3-notebook-toolbar [data-notebook-legacy] {
+    grid-column: 1 / -1;
+}
+
+.sam3-notebook-toolbar > input[type="search"],
+.sam3-notebook-rename,
+.sam3-notebook-entry input,
+.sam3-notebook-entry textarea,
+.sam3-notebook-entry select {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    padding: .4rem .48rem;
+    border: 1px solid var(--border-color-primary, var(--sam3-color-rule));
+    border-radius: .4rem;
+    color: inherit;
+    background: var(--input-background-fill, var(--sam3-color-paper-3));
+    font: inherit;
+}
+
+.sam3-notebook-import {
+    display: grid;
+    place-items: center;
+    text-align: center;
+}
+
+.sam3-notebook-import input[type="file"] {
+    display: none;
+}
+
+.sam3-notebook-presets {
+    display: grid;
+    max-height: min(46rem, 65vh);
+    gap: .45rem;
+    padding: 0 .5rem .55rem;
+    overflow-y: auto;
+    scrollbar-width: thin;
+}
+
+.sam3-notebook-empty {
+    margin: .25rem 0;
+    padding: .8rem;
+    border: 1px dashed var(--border-color-primary, var(--sam3-color-rule));
+    border-radius: .45rem;
+    color: var(--body-text-color-subdued, var(--sam3-color-muted));
+    font-size: .82rem;
+    text-align: center;
+}
+
+.sam3-notebook-preset {
+    min-width: 0;
+    border: 1px solid var(--border-color-primary, var(--sam3-color-rule));
+    border-radius: .48rem;
+    background: var(--background-fill-secondary, var(--sam3-color-paper-2));
+}
+
+.sam3-notebook-preset.selected {
+    border-color: color-mix(
+        in srgb,
+        var(--color-accent, var(--sam3-color-accent)) 65%,
+        var(--border-color-primary, var(--sam3-color-rule))
+    );
+}
+
+.sam3-notebook-preset > header {
+    display: flex;
+    align-items: center;
+    gap: .35rem;
+    min-width: 0;
+    padding: .4rem;
+}
+
+#sam3_notebook_panel .sam3-notebook-preset-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    border-color: transparent;
+    background: transparent;
+    font-weight: 650;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sam3-notebook-count {
+    flex: 0 0 auto;
+    color: var(--body-text-color-subdued, var(--sam3-color-muted));
+    font-size: .72rem;
+}
+
+.sam3-notebook-preset-menu {
+    position: relative;
+    flex: 0 0 auto;
+}
+
+.sam3-notebook-preset-menu > summary {
+    display: grid;
+    place-items: center;
+    min-width: 2.25rem;
+    min-height: 2rem;
+    border: 1px solid var(--border-color-primary, var(--sam3-color-rule));
+    border-radius: .4rem;
+    background: var(--button-secondary-background-fill, var(--sam3-color-paper-3));
+    list-style: none;
+    cursor: pointer;
+}
+
+.sam3-notebook-preset-menu > summary::-webkit-details-marker {
+    display: none;
+}
+
+.sam3-notebook-preset-menu > button {
+    position: absolute;
+    top: calc(100% + .3rem);
+    right: 0;
+    z-index: 20;
+    width: max-content;
+    min-width: 8rem !important;
+    box-shadow: 0 var(--sam3-space-sm) var(--sam3-space-lg) var(--sam3-color-shadow);
+}
+
+.sam3-notebook-preset-body {
+    display: grid;
+    gap: .45rem;
+    padding: 0 .4rem .45rem;
+}
+
+.sam3-notebook-entries {
+    display: grid;
+    gap: .4rem;
+}
+
+.sam3-notebook-entry {
+    display: grid;
+    grid-template-columns: minmax(8rem, .75fr) minmax(10rem, 1.5fr) auto;
+    align-items: start;
+    gap: .4rem;
+    min-width: 0;
+    padding: .45rem;
+    border: 1px solid color-mix(
+        in srgb,
+        var(--border-color-primary, var(--sam3-color-rule)) 70%,
+        transparent
+    );
+    border-radius: .42rem;
+    background: color-mix(
+        in srgb,
+        var(--background-fill-primary, var(--sam3-color-paper)) 80%,
+        transparent
+    );
+}
+
+.sam3-notebook-value-editor {
+    display: grid;
+    gap: .35rem;
+    min-width: 0;
+}
+
+.sam3-notebook-value-editor > label {
+    display: grid;
+    gap: .22rem;
+    min-width: 0;
+    color: var(--body-text-color-subdued, var(--sam3-color-muted));
+    font-size: .72rem;
+}
+
+.sam3-notebook-entry textarea {
+    resize: vertical;
+}
+
+.sam3-notebook-entry-actions {
+    display: flex;
+    gap: .3rem;
+}
+
+.sam3-notebook-add-entry {
+    width: 100%;
+    border-style: dashed !important;
+}
+
+@media (max-width: 1280px) {
+    .sam3-notebook-entry {
+        grid-template-columns: 1fr;
     }
-    .sam3-live-columns { grid-template-columns: 1fr; }
+
+    .sam3-notebook-entry-actions {
+        justify-content: flex-end;
+    }
+}
+
+@media (max-width: 1100px) {
+    .sam3-notebook-prompt-compact {
+        grid-template-columns: 1fr;
+    }
+
+    .sam3-notebook-prompt-compact > #txt2img_prompt_container,
+    .sam3-notebook-prompt-compact > #txt2img_generate_box,
+    .sam3-notebook-prompt-compact > .toprow-compact-stylerow {
+        grid-column: 1;
+        grid-row: auto;
+    }
+
+    .sam3-notebook-columns {
+        grid-template-columns: 1fr;
+    }
+
+    .sam3-notebook-presets {
+        max-height: none;
+    }
 }

@@ -5,7 +5,7 @@ import types
 import unittest
 from pathlib import Path
 
-from sam3ext.workspace_guard import (
+from sam3ext.sampler_load_guard import (
     guard_sampler_app_started_callbacks,
     prune_stale_sampler_load_targets,
 )
@@ -24,7 +24,7 @@ class _Demo:
         self.blocks = {component._id: component for component in components}
 
 
-class WorkspaceSamplerGuardTests(unittest.TestCase):
+class SamplerLoadGuardTests(unittest.TestCase):
     def test_sampler_callbacks_prune_immediately_before_demo_load_registration(self):
         rk_current = (_Component(10), _Component(11))
         rk_stale = (_Component(110), _Component(111))
@@ -151,7 +151,7 @@ class WorkspaceSamplerGuardTests(unittest.TestCase):
         metadata = (ROOT / "metadata.ini").read_text(encoding="utf-8")
         script = (ROOT / "scripts" / "!sam3.py").read_text(encoding="utf-8")
 
-        self.assertIn("workspace-sampler-load-guard", metadata)
+        self.assertIn("notebook-and-sampler-load-guard", metadata)
         self.assertIn("sd-webui-rk-sampler/rk_sampler.py/app_started", metadata)
         self.assertIn("sd-webui-tde-sampler/tde_sampler.py/app_started", metadata)
         self.assertIn("prune_stale_sampler_load_targets(demo)", script)

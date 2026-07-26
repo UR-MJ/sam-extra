@@ -179,9 +179,9 @@ def resolve_adapter_path(
     mode = str(adapter_mode or "Auto-download official").strip().lower()
     if mode in {"auto", "auto-download", "auto-download official"}:
         resolved = default_adapter_path(models_root)
-        # Multiple Live Workspace documents share one Forge process. Serialize
-        # first-use download/rename so simultaneous queued generations cannot
-        # race on the same ``.download`` file.
+        # Concurrent requests share one Forge process. Serialize first-use
+        # download/rename so queued generations cannot race on the same
+        # ``.download`` file.
         with _CACHE_LOCK:
             downloaded = False
             if not resolved.is_file():

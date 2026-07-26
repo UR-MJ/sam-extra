@@ -159,7 +159,7 @@ def guard_sampler_app_started_callbacks(callback_map: Any) -> int:
         if (
             not is_sampler
             or not callable(callback)
-            or getattr(callback, "_sam3_workspace_guarded", False)
+            or getattr(callback, "_sam3_sampler_guarded", False)
         ):
             continue
 
@@ -168,7 +168,7 @@ def guard_sampler_app_started_callbacks(callback_map: Any) -> int:
             prune_sampler_callback_targets(demo, _callback)
             return _callback(demo, app)
 
-        guarded._sam3_workspace_guarded = True
+        guarded._sam3_sampler_guarded = True
         registered.callback = guarded
         installed += 1
 

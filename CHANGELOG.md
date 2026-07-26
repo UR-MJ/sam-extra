@@ -3,6 +3,74 @@
 버전 태그는 GitHub Releases에도 발행됩니다. 아래는 요약이며, guidance/속도 기능의
 상세는 [docs/GUIDANCE.md](docs/GUIDANCE.md)를 참고하세요.
 
+## v0.21.0 — Live Workspaces 폐기 + txt2img Notebook
+
+iframe 기반 Live Workspaces를 걷어내고 단일 Forge 문서 + 서버 저장 Notebook 프리셋으로
+교체한 릴리즈. 선택형 다크 테마와 SMC upstream 프리셋도 포함합니다.
+
+- **선택형 Forge 전역 다크 테마**: `Settings → SAM Extra Appearance`에
+  `Forge Default / Graphite Ember / Obsidian Violet / Warm Espresso / OLED Mono`를
+  추가했습니다. Forge 본체를 수정하지 않고 Gradio 색상 토큰을 확장 CSS로 연결하며,
+  Settings 저장 직후 현재 페이지에 적용되고 Forge 옵션 저장소에 유지됩니다. 커스텀 테마는
+  단색 표면·즉시 포커스 링·최소 모션·공통 상태 규칙을 공유하고, `Forge Default`는 전역
+  덮어쓰기를 완전히 제거합니다.
+- **단일 Forge 문서로 복귀**: `/sam3-live` 셸, iframe, 자동 리다이렉트, Workspace 스냅샷과
+  관련 JavaScript/Python 라우트를 제거. 원래 Forge 루트 주소와 생성 큐·진행 미리보기를 그대로
+  사용합니다.
+- **Notebook 프리셋**: Gallery 아래에서 프리셋 추가·이름 변경·삭제·검색·내보내기/불러오기를
+  지원. 프리셋 하나에 프롬프트, 네거티브, LoRA, XYZ X/Y/Z의 축 유형+값, 주요 생성 설정을
+  여러 항목으로 묶어 현재 화면에 적용할 수 있습니다.
+- **안전한 영구 저장**: Forge data 경로의 `sam-extra/notebook.json`에 revision 기반으로
+  원자 저장하고 직전 세대 `.bak`, 저장 상태, 충돌 방지, 직전 적용 되돌리기를 추가했습니다.
+  Forge/Gradio 로그인 가드와 same-origin 읽기·저장 헤더를 적용하고, 동기 파일 I/O는 작업
+  스레드로 분리했습니다. 원본·백업이 모두 손상되면 빈 데이터로 덮어쓰지 않으며 저장소 I/O
+  오류도 경로를 노출하지 않는 제한된 500 응답으로 처리합니다.
+- **적용 안전성과 이전 데이터 이식**: 프리셋 전체를 사전 검사하고 도중 실패 시 이미 바뀐 값을
+  원자적으로 복구합니다. Undo는 XYZ가 강제로 바꾸는 Script 선택·CSV 모드까지 되돌립니다.
+  기존 `sam-extra.workspace-manager.v1` 데이터가 있으면 명시적 가져오기 버튼으로 지원 항목을
+  Notebook 프리셋에 추가하며 원본 브라우저 데이터는 보존합니다. 프롬프트 안 LoRA 태그의
+  위치를 유지하고 지원 밖 컨트롤·빈 Workspace·한도 초과분은 가져오기 전에 개수로 알립니다.
+- **편한 3열 UI 유지**: Parameters / Scripts / Gallery 재배치는 유지하되 always-on 확장은
+  Parameters 아래에 두고 Script 선택기와 내장 Script 패널만 가운데에 둡니다. Forge의
+  Default/Compact 프롬프트 레이아웃을 모두 감지하며 Compact의 붙여넣기·지우기·스타일·토큰
+  도구 행도 프롬프트와 함께 옮깁니다. 기존 레이아웃만 남은 재마운트에서도 Notebook 패널을
+  Gallery 아래에 다시 연결합니다.
+- **Forge 원본 탭 복구**: settings/gallery를 분리한 뒤 `#txt2img_extra_tabs`를
+  Prompt/Negative 아래로 옮겨 Generation / Textual Inversion / Checkpoints / Lora 탭을
+  계속 사용할 수 있게 했습니다. 재마운트 이중 이동과 숨은 탭 회귀도 테스트합니다.
+- **LoRA Manager 단순화**: Workspace 자식 감지와 셸 메시지 중계를 제거하고 단일 Forge 페이지에
+  Manage 탭과 프롬프트 삽입 브리지를 한 번 주입합니다.
+- **SMC upstream 프리셋 이식**: ComfyUI-DCW의 `Off / Auto / 모델별 / Custom` 선택과
+  모델 감지 규칙을 추가했습니다. Forge `Anima`는 `Cosmos / Wan`으로 자동 판별되어
+  `lambda=6.0, k=0.20`이 적용되며, Custom 범위도 upstream과 맞췄습니다. 기존 SMC 체크박스,
+  API/infotext 인자와 XYZ 축은 호환 영역에 유지하고 새 preset 인자는 맨 뒤에 추가했습니다.
+  새 Custom UI 기본 `k=0.10`과 별개로, 구버전 호출이 기존 index 27을 생략한 경우에는 역사적
+  폴백 `k=0.20`을 유지합니다.
+- **Guidance 패널 순서**: 실행 수학은 upstream 호환인 `SMC → APG → CWM → DCW`를
+  유지하면서 화면 순서는 `DCW → CWM → SMC`로 정리했습니다. XYZ 축 목록은 **정수 인덱스가
+  저장되는 호환 표면**이므로 v0.20.0의 46개 순서를 그대로 유지하고 `[Anima SMC] Preset`만
+  맨 뒤에 append했습니다. 축 순서를 고정하는 회귀 테스트를 추가했습니다.
+- **드롭다운 백엔드 이중 실행 수정**: 값을 쓰면 Gradio가 이미 change+input을 발생시키므로
+  (`handle_change`, `value_is_output`은 서버 출력에서만 참), 수동 dispatch를 값이 실제로
+  바뀌지 않은 경우로 제한했습니다. 체크포인트 선택이 모델을 두 번 로드하던 문제가 사라집니다.
+  multiselect는 검색 입력이 항상 비어 있어 `.token`에서 선택값을 읽습니다(VAE/Text Encoder).
+- **fast 드롭다운 선택지 갱신**: 프록시가 실제 컨트롤을 숨기므로 설치 시점 목록에 고정되던
+  문제를 수정했습니다. `window.gradio_config`가 실시간 갱신되는 점을 이용해 보관한 배열
+  참조만 O(1)로 비교하고 달라졌을 때만 다시 매핑합니다. 빈 목록으로의 갱신도 반영합니다.
+  외부 주입 목록(`/sdapi/v1` 모델 드롭다운)만 이 경로에서 제외됩니다.
+- **LoRA Manager 탭이 닫히지 않던 문제 수정**: Gradio 4.40은 비선택 TabItem을 DOM에 두고
+  인라인 `display`만 바꾸므로 합성 Manage 패널은 이 확장이 직접 숨겨야 합니다. 주입 시점
+  노드를 캡처하는 방식을 버리고 컨테이너 위임 리스너 + 클릭 시점 노드 조회로 바꿨고, 다른
+  탭 클릭 시 Gradio flush를 기다리지 않고 즉시 닫습니다. 순서를 통제할 수 없는 경우를 위해
+  컨테이너 MutationObserver를 안전망으로 두었습니다.
+- **스크립트 float에서 `z-index` 제거**: 정수 `z-index`는 stacking context를 만들어
+  `position:fixed`인 Gradio 팝업까지 그 레벨에 갇히게 합니다. DOM 순서만으로 충분합니다.
+- **`.gitignore`**: 어시스턴트 작업 디렉터리(`.codex/`, `.hallmark/`, `.agents/`)와
+  `.claude/anima_*.json`을 제외해 배포 저장소에 섞이지 않게 했습니다.
+- **검증**: 회귀 테스트 **146개** 통과, `node --check`·`py_compile`·제어문자 검사 통과,
+  삭제된 모듈에 대한 dangling 참조 0개. 브라우저 실사용 확인(모델 로드 1회, Manage 탭 닫힘)은
+  이 환경에서 완료하지 못했습니다 — 재시작 + 하드 리프레시 후 확인이 필요합니다.
+
 ## v0.20.0 — Skimmed/PAG 순서 복구 + Anima CLIP Modulation
 
 - **Skimmed CFG가 PAG 계열을 지우던 실제 원인 수정**: Forge Neo의

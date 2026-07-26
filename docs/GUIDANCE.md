@@ -154,13 +154,35 @@ MaHiRo/RescaleCFG/custom CFG를 쓰는 경우 먼저 전부 끈 상태로 비교
 |---|---:|---|
 | CWM alpha low | 0.30 | 초반 LL 대역 CFG 변화 |
 | CWM alpha high | 0.15 | 후반 HH 대역 CFG 변화 |
-| SMC lambda | 6.0 | Anima/Cosmos 보수적 시작값, 벤치마크 최적값 아님 |
-| SMC k | 0.20 | element-wise sign이 아닌 전체 unit-L2 방향 사용 |
+| SMC preset | `Off` | `Auto`는 모델군을 감지해 upstream 값을 선택 |
+| Custom lambda | 6.0 | `Custom`에서만 사용, UI 범위 0.5–30.0 |
+| Custom k | 0.10 | `Custom`에서만 사용, UI 범위 0–5.0 |
+
+SMC 프리셋과 Auto 감지는
+[namemechan/ComfyUI-DCW](https://github.com/namemechan/ComfyUI-DCW)의 공개 계약을
+그대로 따릅니다.
+
+| 프리셋 | lambda | k |
+|---|---:|---:|
+| SD1.5 / SD2 | 5.0 | 0.10 |
+| SDXL | 5.0 | 0.10 |
+| SD3 / SD3.5 | 6.0 | 0.10 |
+| Flux | 6.0 | 0.70 |
+| Qwen-Image | 6.0 | 0.10 |
+| Cosmos / Wan | 6.0 | 0.20 |
+
+Forge의 `Anima` 엔진은 Auto에서 `Cosmos / Wan`으로 판별됩니다. 감지하지 못한 모델은
+upstream처럼 `SD1.5 / SD2`로 되돌아갑니다. 구버전의 `Enable SMC` 체크박스와
+`[Anima SMC] Enable` XYZ는 호환용으로 유지되며, preset이 `Off`인 상태에서 이를 켜면
+Custom lambda/k가 적용됩니다. 새 XYZ에는 `[Anima SMC] Preset`도 있습니다.
 
 Anima 16채널 latent에서 `alpha high > +0.15`는 한 인물이 여러 인물로 갈라질 수 있습니다.
 UI는 동적 경고만 표시하며 값을 강제로 자르지 않습니다.
 SMC/CWM 입력의 NaN·양/음의 Inf는 reference 구현처럼 0으로 정리해 비정상 값이 latent 전체로
 증폭되지 않게 합니다.
+
+화면 패널은 찾기 쉽도록 `DCW → CWM → SMC` 순서입니다. 이는 수학적 실행 순서를
+바꾸는 설정이 아니며 실제 처리는 원본 정의대로 `SMC → APG → CWM`, 그 뒤 DCW입니다.
 
 ## 3. DCW
 
@@ -334,7 +356,7 @@ python -m unittest discover -s tests -v
 Haar 4D/5D·홀수 크기 round-trip, CWM/SMC/DCW/DAVE 중립값, APG 표준 CFG 환원,
 SMC/CWM 비정상 수치 정리, ADG state flush, CNS 결정성·RNG 비소비·표준편차 보존,
 Skimmed callback 실제 prepend 순서와 PAG scale 반응, CLIP adapter 수식·Forge Anima
-shape 추론·block AdaLN 무변이 주입, pass 종료 tensor 해제와 Live Workspaces 자산
+shape 추론·block AdaLN 무변이 주입, pass 종료 tensor 해제와 Notebook 자산
 구조를 포함합니다.
 
 ## 크레딧

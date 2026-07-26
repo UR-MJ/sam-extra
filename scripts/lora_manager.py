@@ -78,8 +78,8 @@ def _spawn_handler() -> str:
 
 
 def _on_app_started(demo, app) -> None:
-    # Register the lightweight config/spawn JSON routes so the Live Workspace
-    # shell can drive the manager without the hidden Gradio bridge.
+    # Register lightweight same-origin config/spawn routes for the embedded
+    # manager. They share the same lifecycle as the hidden Gradio bridge.
     try:
         register_lora_routes(app)
     except Exception:

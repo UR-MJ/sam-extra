@@ -6,7 +6,7 @@ SAM3 / SAM3.1 마스크 + 인페인트 확장. 다섯 가지 워크플로 제공
 2. **Refine 패널** (v0.4.0+) — ⚠️ **실험 기능 (아직 제대로 작동하지 않음)** — 갤러리에서 이미지 골라 즉시 SAM3+인페인트+CN으로 재손질, 결과를 갤러리에 누적
 3. **Anima Tile-Repair** (v0.8.0+) — ⚠️ **실험 기능 (아직 제대로 작동하지 않음)** — [kohya-ss/sd-scripts](https://github.com/kohya-ss/sd-scripts)의 Anima ControlNet-LLLite 추론을 가져와 임베드 (Apache-2.0)
 4. **LoRA Manager** (v0.9.0+) — [willmiao/ComfyUI-Lora-Manager](https://github.com/willmiao/ComfyUI-Lora-Manager)를 그대로 가져와 extra-networks 탭에 임베드 (GPL-3.0)
-5. **txt2img Workspaces** (v0.10.0+, v0.13.0 실제 탭 모드) — Live 셸 또는 실제 브라우저 탭에서 이름을 붙인 작업공간을 추가·삭제하고 프롬프트·생성 설정·스크립트·XYZ Plot 상태를 서로 독립적으로 유지
+5. **txt2img Notebook** — 한 Forge 화면에서 이름 붙인 프리셋을 만들고 프롬프트·네거티브·LoRA·XYZ Plot·생성 설정을 원하는 조합으로 즉시 적용
 
 ControlNet 통합 (LLLite 인페인트 모델 자동 호환 처리), 옷 교체용 Target/Replacement 워크플로, 시드 고정, VRAM 절약 옵션, XYZ plot 다축 등 지원.
 
@@ -207,6 +207,22 @@ SAM3 체크포인트는 ~3.5 GB. 한번 로드되면 `lru_cache(maxsize=2)`에 �
 
 모든 위젯에 `elem_id` 부여 (v0.6.0). webui Settings → **"Save UI defaults"** 클릭 시 SAM3 패널 + Refine 패널 값 전부 저장됨. 다음 세션 시작 시 자동 복원.
 
+### Forge UI 테마
+
+`Settings → SAM Extra Appearance`의 **Forge UI 테마**에서 전체 Forge/Gradio 화면의
+표면 팔레트를 바꿀 수 있습니다.
+
+- `Forge Default`: 확장의 전역 색상 덮어쓰기를 완전히 해제
+- `Graphite Ember`: 중립 흑연색 + Forge 계열 주황 강조
+- `Obsidian Violet`: 보랏빛이 아주 약하게 섞인 흑요석색 + 보라 강조
+- `Warm Espresso`: 따뜻한 갈흑색 + 호박색 강조
+- `OLED Mono`: 순흑이 아닌 저채도 근흑색 + 미색 강조
+
+Settings에서 선택 후 **Apply settings**를 누르면 현재 페이지에 즉시 적용되고 다음 실행에도
+유지됩니다. 구현은 이 확장의 CSS 변수/JavaScript에만 있으며 Forge Neo 본체 파일과 Gradio
+테마 설정은 변경하지 않습니다. 모든 커스텀 테마는 동일한 글꼴·간격·포커스·상태 규칙을
+공유하고 팔레트만 전역으로 교체합니다.
+
 ---
 
 ## 의존성
@@ -286,11 +302,10 @@ t2i Generate → 갤러리 N장
   ComfyUI 대신 현재 프롬프트로 삽입합니다. Append는 이어붙이고, Replace는 기존 `<lora:...>`를
   교체합니다. (벤더의 ComfyUI 하드코딩 전송을 브리지가 capture 단계에서 차단)
 
-**Live Workspace 연동 (v0.18.0+):** Live Workspace 모드에서는 워크스페이스마다 매니저를
-중복 주입하지 않고, **Live 셸 헤더의 `LoRA` 버튼**이 매니저 하나를 오버레이로 엽니다. 매니저에서
-LoRA를 추가하면 셸이 그걸 **현재 보고 있는 워크스페이스의 프롬프트**로 전달합니다. 셸은 히든
-Gradio 브리지 대신 `/sam3-lora/config`·`/sam3-lora/spawn` HTTP 엔드포인트로 서버를 조회·기동합니다.
-(네이티브 탭·일반 Forge 모드는 기존처럼 각자 Manage 탭을 그대로 유지.)
+Notebook은 Forge 문서 하나만 사용하므로 Manage 탭도 하나만 주입됩니다. 매니저에서 LoRA를
+전송하면 현재 txt2img 프롬프트에 바로 추가하거나 기존 LoRA 토큰을 교체합니다.
+`/sam3-lora/config`·`/sam3-lora/spawn` 엔드포인트는 같은 페이지의 매니저를 조회·기동하는 데
+사용됩니다.
 
 ### 의존성 자동 설치
 
@@ -321,90 +336,61 @@ standalone 웹 UI 기능(검색·다운로드·정리·프리뷰·메타데이�
 
 ---
 
-## 워크플로 5: txt2img Workspaces (Live 셸 / 실제 브라우저 탭) (v0.10.0+, v0.13.0 개선)
+## 워크플로 5: txt2img Notebook
 
-`Settings → SAM3 Workspaces`의 **작업공간 모드**로 `Live Workspace`(기본)와 `기본 Forge UI`
-중 하나를 선택합니다(새로고침 후 적용). `기본 Forge UI`는 워크스페이스 없이 순정 Forge를 그대로
-씁니다. 아래는 `Live Workspace` 모드 설명입니다.
+Live Workspace의 다중 Gradio 문서·iframe·별도 라우트 대신, 원래 Forge 주소의 **문서 하나**만
+사용합니다. txt2img는 Prompt/Negative/Generate 아래에 **Parameters / Scripts / Gallery** 3열로
+정리되고, Notebook은 **Gallery 바로 아래**에 놓입니다. Forge의 Default/Compact 프롬프트 레이아웃
+양쪽을 지원하며 좁은 화면에서는 한 열로 접힙니다.
 
-현재 WebUI 포트(예: `7860` 또는 `8760`)에서 기본 3개(최대 20개)의 브라우저 화면을 하나의
-**Live Workspaces** 안에 유지합니다. 접속 시 확장 전용 경량 셸인 `/sam3-live`로 자동 이동하지만
-포트와 Forge 서버는 그대로입니다(리다이렉트 여부는 서버가 모드 설정을 읽어 결정). 각 Workspace는
-별도 same-origin iframe의 Gradio 문서이므로 버튼을 누를 때 값을 갈아 끼우지 않고, 이미 설정된
-화면의 표시만 전환합니다. 숨겨진 Workspace는 `inert` 상태라 클릭·단축키 입력을 받지 않고
-백그라운드 재-마운트 감시(observer/폴링)를 일시정지해 전환 부담을 줄이며, **Generate는 현재 보고
-있는 Workspace 하나에서만 실행**됩니다.
+- **Parameters**: sampler, 크기, CFG와 always-on 확장 기능을 원래 구성 그대로 표시
+- **Scripts**: Forge의 Script 선택기와 Prompt Matrix / Prompts from file / X/Y/Z Plot 패널만 표시
+- **Gallery**: Forge 기본 갤러리·진행 미리보기와 그 아래 Notebook 표시
+- 네거티브 프롬프트 아래의 Forge 원본 **Generation / Textual Inversion / Checkpoints / Lora**
+  탭 바도 함께 복구하므로 Checkpoint·LoRA 카드 브라우저를 계속 사용할 수 있음
 
-현재 선택한 Workspace를 먼저 준비해 바로 사용할 수 있게 하고 나머지는 한 번에 하나씩
-백그라운드에서 로드합니다. `Live Workspaces ＋`를 누르면 현재 설정을 복사한 새 Workspace가
-생기며, `⋯` 메뉴에서 이름 변경·삭제·JSON 내보내기/가져오기를 할 수 있습니다. 탭
-더블클릭으로도 이름을 바꿀 수 있습니다. 헤더의 작은 상태 문구에는 `저장 대기…`,
-`자동 저장됨`, 충돌/오류가 현재 Workspace 기준으로 표시됩니다.
+Notebook을 펼친 뒤 머리의 `＋`를 누르면 `preset1`, `preset2` 순으로 프리셋이 생깁니다.
+프리셋 이름을 클릭하면 편집 영역을 열고 닫으며, `✎`로 이름을 바꾸고 `…`에서 삭제합니다.
+프리셋 안의 `＋ 항목 추가`로 여러 교체 항목을 한 프리셋에 묶을 수 있습니다.
 
-iframe 전환이 무겁게 느껴지면 헤더의 **실제 탭으로 열기**를 누를 수 있습니다. 현재 화면들을 먼저
-저장한 뒤 Live 셸 탭은 활성 Workspace로 바뀌고 나머지 Workspace는 같은 포트의 실제 브라우저
-탭으로 열립니다. 이 모드에서는 iframe 표시 전환이 전혀 없어서 원래 같은 WebUI 주소를 탭 3개로
-열어 사용하던 것과 같은 방식으로 전환합니다. 각 탭 제목과 상단 바에는 Workspace 이름이 표시되고,
-자동 저장 상태도 개별 탭에 나타납니다. 여러 탭 열기가 차단되면 주소창의 팝업 허용 아이콘에서
-현재 WebUI 주소를 허용한 뒤 버튼을 다시 누르면 됩니다. 상단의 `Live 관리로 돌아가기`는 해당 탭을
-다시 `/sam3-live` 관리 셸로 바꿉니다.
+지원 항목:
 
-각 화면은 위쪽 Prompt/Negative/Generate와 아래쪽 **Parameters / Scripts / Gallery** 3열로
-정리됩니다. 좁은 화면에서는 한 열로 접힙니다. 순정 Forge로 돌아가려면 `Settings → SAM3 Workspaces`
-에서 모드를 `기본 Forge UI`로 바꾸고 새로고침하세요(인-페이지 툴바 방식은 폐기됨). 각 iframe 안의 Forge 상단
-**txt2img / img2img / PNG Info / Settings / Extensions** 탭은 그대로 유지되며, 확장 전용
-3열 배치는 txt2img에만 적용됩니다. 생성 대기·큐·진행률·중간 미리보기는 Forge 기본 UI를
-그대로 사용합니다.
+- 프롬프트, 네거티브 프롬프트, LoRA 토큰
+- XYZ의 X/Y/Z 각각에 대한 **축 유형 + 축 값**
+- Sampling Method, Schedule Type, Steps, Width/Height, Batch Count/Size
+- Shift, CFG Scale, Rescale CFG, Seed
 
-기존 v0.10.0의 Workspace 1 / 2 / 3과 저장 데이터는 자동으로 유지됩니다. 각 작업공간에는 다음
-상태가 독립적으로 보존됩니다.
-
-- positive/negative prompt와 seed, steps, sampler, scheduler, 크기 등 txt2img 생성 설정
-- 선택한 Script와 해당 Script의 옵션
-- X/Y/Z Plot의 축 종류, 값, 관련 옵션
-- `elem_id`가 없는 타 확장 컨트롤도 라벨과 상위 영역 조합이 유일하면 안전하게 포함
-- 현재 세션의 txt2img **마지막 생성 결과**와 이미지별 infotext/generation info
-
-각 iframe은 자기 고정 slot에 입력을 바꿀 때마다 **브라우저 로컬 저장소에 자동 저장**합니다.
-Workspace 버튼 전환에는 값 복원이 전혀 없고, WebUI/페이지가 새로 시작할 때만 Forge 기본 UI가
-준비된 뒤 해당 slot 저장본을 한 번 적용합니다. 즉 Forge의 `Save UI defaults`가 세 화면의 공통
-기준이고, 각 Workspace 저장본은 그 위에 얹는 개별 프로필입니다.
-
-갤러리는 큰 이미지 바이트를 복제하지 않고 Forge/Gradio의 파일 참조와 infotext만 브라우저
-IndexedDB에 따로 저장합니다. **Generate를 누르면 그 Workspace의 이전 갤러리를 먼저 비우고 이번
-생성 결과만 남깁니다.** 새 Workspace는 현재 설정만 복제하고 갤러리는 빈 상태로 시작하므로 공통
-설정을 다시 입력하지 않고, Workspace를 오가며 서로 다른 LoRA·프롬프트의 마지막 결과를 비교할
-수 있습니다. Live 셸은 WebUI 서버가 내려갔다가 돌아온 것을 감지하면 한 번 자동 새로고침하여
-세 iframe의 오래된 Gradio 세션을 버리고 갤러리를 비웁니다. Forge Neo 기본 파일은 수정하지
-않으며 이 확장의 프런트엔드에서만 동작합니다.
+각 항목의 `현재값`은 현재 Forge UI 값을 프리셋으로 가져옵니다. 프리셋의 `적용`은 저장된 항목만
+현재 화면에 덮어쓰며, 직전 적용은 Notebook 머리의 `↶`로 한 번 되돌릴 수 있습니다. XYZ 항목이
+있으면 Script를 `X/Y/Z plot`으로 열고 CSV 입력 모드에서 축 유형을 먼저 적용한 뒤 값을 적용합니다.
+적용 전 대상·숫자·선택지를 먼저 검사하고, 도중 오류가 나면 이미 바뀐 항목도 자동 복구합니다.
+되돌리기에는 프리셋 값뿐 아니라 적용 전 Script 선택과 XYZ CSV 모드도 포함됩니다. 검색, JSON
+내보내기/불러오기도 지원합니다.
 
 ### 저장 범위와 주의사항
 
-- txt2img 갤러리는 Workspace마다 **마지막 한 번의 생성 결과**만 현재 브라우저 세션 동안 보존합니다.
-  페이지 새로고침이나 WebUI 재시작 시 모든 Workspace 갤러리를 비웁니다. 생성 한 번에 500장이
-  넘는 경우 최신 500장까지만 남깁니다.
-- 이미지 파일 자체를 이동·복제하지 않으므로 원본 출력/Gradio 임시 파일을 삭제하면 해당 썸네일은
-  다시 열리지 않을 수 있습니다.
-- 갤러리 기록은 로컬 전용이며 Workspace JSON **내보내기/가져오기에는 포함하지 않습니다**.
-- 이미지·파일 입력과 img2img 갤러리는 저장하거나 복원하지 않습니다.
-- 라벨과 상위 영역까지 같은 익명 컨트롤이 둘 이상이면 잘못된 복원을 막기 위해 해당 충돌
-  컨트롤은 저장에서 제외합니다.
-- checkpoint/VAE 등 Forge 전역 **Quicksettings**는 작업공간에 포함하지 않습니다. 모델 재로딩을
-  유발하는 전역 상태가 작업공간 전환과 섞이지 않도록 하기 위함입니다. iframe이 여러 개여도 Forge
-  서버·GPU·생성 큐와 현재 로드된 checkpoint는 하나이므로 이 항목들은 실제 브라우저 탭 여러 개처럼
-  서로 공유됩니다.
-- 데이터는 서버가 아닌 현재 브라우저 프로필의 로컬 저장소에 평문으로 남습니다. 민감한
-  프롬프트를 공용 PC에 저장하지 마세요.
-- 브라우저 저장소는 **동일 출처(same origin: 프로토콜 + 호스트 + 포트)** 단위입니다. 예를 들어
-  `127.0.0.1:8760`과 `localhost:8760`, 또는 서로 다른 포트는 별도 저장소를 사용합니다.
-- 같은 주소의 다른 탭이 동일한 Workspace를 먼저 수정하면 덮어쓰지 않고 충돌 경고를 표시합니다.
-  이 경우 기존 탭을 닫거나 새로고침한 뒤 계속하세요.
-- 다른 포트·호스트·브라우저 프로필로 옮길 때는 작업공간 메뉴의 **내보내기/가져오기**를
-  사용하세요.
-- Workspace 기능이 포함된 확장 업데이트 후에는 경량 셸의 Python 경로와 새 프런트엔드 자산을
-  다시 등록해야 하므로 브라우저 새로고침만 하지 말고 **WebUI 프로세스를 한 번 완전히
-  재시작**하세요. 순정 Forge로 돌아가려면 `Settings → SAM3 Workspaces`에서 모드를
-  `기본 Forge UI`로 바꾸고 새로고침하면 됩니다.
+- 변경은 약 0.65초 뒤 자동 저장되며 머리에 `저장 대기…`, `저장 중…`, `저장됨 HH:MM` 또는
+  오류 상태가 표시됩니다.
+- 저장 파일은 Forge 데이터 경로의 `sam-extra/notebook.json`입니다. 확장 업데이트로 덮어쓰지
+  않으며 직전 정상 세대는 `notebook.json.bak`에 보관합니다.
+- 원본과 백업이 모두 손상된 경우 빈 Notebook으로 간주해 덮어쓰지 않고 복구가 필요하다는 오류를
+  표시합니다. 디스크 읽기·원자 저장은 Forge의 비동기 요청 처리를 막지 않도록 작업 스레드에서
+  실행합니다.
+- `/sam3-notebook`은 Forge/Gradio의 로그인 보호를 그대로 따르며, 읽기·저장 요청 모두 같은
+  페이지에서 보내는 전용 헤더도 확인합니다.
+- 다른 브라우저 탭에서 더 최신 revision을 저장했다면 오래된 탭은 덮어쓰지 않고 충돌을 표시합니다.
+- Forge의 `Save UI defaults`는 기존처럼 전역 기본값을 담당합니다. Notebook은 기본값을 변경하지
+  않고 사용자가 `적용`한 항목만 현재 txt2img 화면에 넣습니다.
+- checkpoint/VAE 같은 전역 Quicksettings, 갤러리 이미지, img2img 상태는 프리셋에 저장하지
+  않습니다.
+- 같은 주소·브라우저에 기존 Live Workspace 데이터가 남아 있으면 Notebook 도구 모음에
+  `이전 Workspaces 가져오기`가 나타납니다. 이를 누르면 각 Workspace의 지원 가능한
+  Prompt/Negative/XYZ/생성 설정을 별도 프리셋으로 **추가**하며, 원본 localStorage 데이터는
+  삭제하지 않습니다. LoRA 태그는 원래 프롬프트 안의 위치 그대로 보존하며, Notebook 지원
+  대상 밖 컨트롤·빈 Workspace·프리셋 한도 초과분은 적용 전에 개수를 표시합니다.
+- Python API와 새 JavaScript 자산을 등록하려면 업데이트 후 **WebUI를 완전히 재시작**하고
+  브라우저에서 한 번 `Ctrl+Shift+R` 하세요. 접속 주소는 `/sam3-live`가 아닌 원래 Forge 루트
+  주소(예: `http://127.0.0.1:7860/`)입니다.
 
 ---
 
@@ -453,6 +439,9 @@ Modulation Guidance를 쓰려면 768차원 CLIP-L safetensors를
 
 - CFG base의 **SMC·APG·CWM은 독립 토글**입니다. 셋 다 끄면 MaHiRo/custom CFG 결과를
   그대로 유지하고, 켜진 것들은 항상 `SMC → APG → CWM` 순서로 적용됩니다.
+- SMC는 ComfyUI-DCW와 같은 `Off / Auto / SD1.5·2 / SDXL / SD3·3.5 / Flux /
+  Qwen-Image / Cosmos·Wan / Custom` 프리셋을 제공합니다. `Auto`에서 Forge `Anima`는
+  `Cosmos / Wan (lambda 6.0, k 0.20)`으로 판별되며, 직접 수치는 `Custom`에서만 사용됩니다.
 - CFG base가 켜지면 incoming에서 `w_eff`를 복원해 Forge의 `edit_strength`를 보존하고, 비선형 fit
   오차가 크면 경고합니다.
 - Skimmed CFG는 별도 스크립트(별도 아코디언)이며 CFG base보다 **먼저** 실행되고, skim 결과를
@@ -471,8 +460,9 @@ Modulation Guidance를 쓰려면 768차원 CLIP-L safetensors를
 - Modulation Guidance는 메인 Qwen을 교체하지 않고 별도 768차원 CLIP-L을 사용합니다.
   기본 OFF이고 `w=0`에서도 base modulation은 남으므로 진짜 기준 이미지는 토글 OFF입니다.
 - PAG/SEG 자체 A/B는 `Rescale=0`, SLG/APG/ADG off로 원인을 분리하세요.
-- DCW·DAVE·CNS는 Guidance 본문에 펼쳐 표시하며, APG/Adaptive의 고급값만 접힌
-  세부 영역으로 둡니다.
+- Guidance 본문의 관련 패널은 `DCW → CWM → SMC` 순으로 배치하고 DCW·DAVE·CNS도
+  펼쳐 표시합니다. 이 화면 순서는 계산 순서(`SMC → APG → CWM`, 이후 DCW)와 구분됩니다.
+  APG/Adaptive의 고급값만 접힌 세부 영역으로 둡니다.
 
 확장 목록 아래 **Anima Reference-Latent PoC (debug / 안전)** 패널의
 `Log Guidance verification summary`를 켜면 attention hit/raw delta, CFG `w_eff`/fit,

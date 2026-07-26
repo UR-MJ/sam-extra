@@ -78,9 +78,12 @@ except ImportError:  # standalone/unit-test loader
     shared = None  # type: ignore
 from sam3ext.guidance.cns import color_noise_wavelet
 from sam3ext.guidance.cwm_smc import (
+    SMC_PRESET_NAMES,
     apply_cwm_error,
     apply_smc_error,
     compose_cfg,
+    normalize_smc_preset,
+    resolve_smc_preset,
 )
 from sam3ext.guidance.dave import apply_dave
 from sam3ext.guidance.dcw import apply_dcw
@@ -251,8 +254,10 @@ _CFG: dict = {
     "experimental_stack": False,
     "alpha_low": 0.30,
     "alpha_high": 0.15,
+    "smc_preset": "Off",
+    "smc_resolved_preset": "Off",
     "smc_lambda": 6.0,
-    "smc_k": 0.20,
+    "smc_k": 0.10,
     "steps": 0,
     "fit_error": None,
     "effective_scale": None,
@@ -1799,6 +1804,12 @@ def _make_pag_xyz_axis() -> None:
             "[Anima CFG] Experimental Stack", str,
             partial(_pag_xyz_set, field="cfg_stack"), choices=bool_choices,
         ),
+        # xyz_grid persists a chosen axis by its INTEGER index in this list, so
+        # the order here is a compatibility surface exactly like the script-arg
+        # list: reordering it silently repoints every saved grid at a different
+        # control. Keep the historical CWM -> SMC -> DCW order and append new
+        # axes at the end (see "[Anima SMC] Preset" after the Mod block below).
+        # The UI panel order is presentation-only and may differ.
         xyz_grid.AxisOption(
             "[Anima CWM] Enable", str,
             partial(_pag_xyz_set, field="cwm_enabled"), choices=bool_choices,
@@ -1882,6 +1893,12 @@ def _make_pag_xyz_axis() -> None:
         xyz_grid.AxisOption(
             "[Anima Mod] End Block", float,
             partial(_pag_xyz_set, field="mod_end_layer"),
+        ),
+        # Appended last on purpose — see the ordering note above.
+        xyz_grid.AxisOption(
+            "[Anima SMC] Preset", str,
+            partial(_pag_xyz_set, field="smc_preset"),
+            choices=lambda: list(SMC_PRESET_NAMES),
         ),
     ]
 
@@ -2176,28 +2193,28 @@ class AnimaSafePAG(scripts.Script):
                 "**SMC · APG · CWM은 서로 독립 토글**입니다. 원하는 만큼 함께 켤 수 "
                 "있고, 여러 개가 켜지면 항상 **SMC → APG → CWM** 순서로 적용됩니다. "
                 "APG 토글은 위 APG 섹션에 있습니다. 셋 다 끄면 Forge·MaHiRo·다른 CFG "
-                "확장의 결과를 그대로 보존합니다."
+                "확장의 결과를 그대로 보존합니다. 아래 패널은 찾기 쉽도록 "
+                "**DCW → CWM → SMC** 순서로 배치했습니다."
             )
 
-            gr.Markdown("#### SMC — sliding-mode control (스텝 간 CFG error 안정화)")
-            smc_enabled = gr.Checkbox(
-                label="Enable SMC",
+            gr.Markdown("#### DCW — post-CFG wavelet correction")
+            dcw_enabled = gr.Checkbox(
+                label="Enable DCW",
                 value=False,
-                info="lambda 또는 k가 0이면 켜도 효과가 없습니다.",
-                elem_id="anima_guidance_smc_enable",
+                elem_id="anima_guidance_dcw_enable",
             )
             with gr.Row():
-                smc_lambda = gr.Slider(
-                    label="SMC lambda (Anima/Cosmos 보수값 6.0)",
-                    minimum=0.0, maximum=10.0, step=0.1, value=6.0,
-                    info="스텝 간 흔들림이나 과보정이 보이면 낮추세요. 0이면 SMC가 꺼집니다.",
-                    elem_id="anima_guidance_smc_lambda",
+                dcw_lambda_low = gr.Slider(
+                    label="DCW lambda low",
+                    minimum=-0.5, maximum=0.5, step=0.005, value=0.10,
+                    info="구도·밝기·큰 색면이 어색해지면 0 쪽으로 줄이세요.",
+                    elem_id="anima_guidance_dcw_lambda_low",
                 )
-                smc_k = gr.Slider(
-                    label="SMC k (Anima/Cosmos 보수값 0.20)",
-                    minimum=0.0, maximum=1.0, step=0.01, value=0.20,
-                    info="보정이 튀거나 디테일이 깨지면 낮추세요. 0이면 SMC가 꺼집니다.",
-                    elem_id="anima_guidance_smc_k",
+                dcw_lambda_high = gr.Slider(
+                    label="DCW lambda high",
+                    minimum=-0.5, maximum=0.5, step=0.005, value=0.02,
+                    info="윤곽 링·미세 노이즈가 생기면 0 쪽으로 줄이세요.",
+                    elem_id="anima_guidance_dcw_lambda_high",
                 )
 
             gr.Markdown("#### CWM — CFG wavelet mixing (주파수 대역별 CFG 재가중)")
@@ -2236,6 +2253,35 @@ class AnimaSafePAG(scripts.Script):
                 show_progress=False,
             )
 
+            gr.Markdown("#### SMC — sliding-mode control (스텝 간 CFG error 안정화)")
+            smc_preset = gr.Dropdown(
+                label="SMC preset",
+                choices=list(SMC_PRESET_NAMES),
+                value="Off",
+                info=(
+                    "Auto는 현재 모델을 감지해 원본 ComfyUI-DCW 값을 적용합니다. "
+                    "Anima는 Cosmos / Wan (lambda 6.0, k 0.20)으로 판별됩니다."
+                ),
+                elem_id="anima_guidance_smc_preset",
+            )
+            gr.Markdown(
+                "`Custom`을 선택했을 때만 아래 두 값이 사용됩니다. "
+                "다른 프리셋에서는 표시값과 무관하게 프리셋 값이 적용됩니다."
+            )
+            with gr.Row():
+                smc_lambda = gr.Slider(
+                    label="Custom SMC lambda",
+                    minimum=0.5, maximum=30.0, step=0.1, value=6.0,
+                    info="스텝 간 흔들림이나 과보정이 보이면 낮추세요.",
+                    elem_id="anima_guidance_smc_lambda",
+                )
+                smc_k = gr.Slider(
+                    label="Custom SMC k",
+                    minimum=0.0, maximum=5.0, step=0.01, value=0.10,
+                    info="보정이 튀거나 디테일이 깨지면 낮추세요. 0이면 Custom SMC가 중립입니다.",
+                    elem_id="anima_guidance_smc_k",
+                )
+
             with gr.Accordion("Legacy CFG base mode (구버전 호환)", open=False):
                 gr.Markdown(
                     "예전의 상호배타 라디오입니다. 저장된 infotext·API 호출·XYZ 그리드가 "
@@ -2261,25 +2307,14 @@ class AnimaSafePAG(scripts.Script):
                     info="세 토글을 모두 켜는 것과 같습니다. 새 토글을 쓰면 필요 없습니다.",
                     elem_id="anima_guidance_experimental_stack",
                 )
-
-            gr.Markdown("#### DCW — post-CFG wavelet correction")
-            dcw_enabled = gr.Checkbox(
-                label="Enable DCW",
-                value=False,
-                elem_id="anima_guidance_dcw_enable",
-            )
-            with gr.Row():
-                dcw_lambda_low = gr.Slider(
-                    label="DCW lambda low",
-                    minimum=-0.5, maximum=0.5, step=0.005, value=0.10,
-                    info="구도·밝기·큰 색면이 어색해지면 0 쪽으로 줄이세요.",
-                    elem_id="anima_guidance_dcw_lambda_low",
-                )
-                dcw_lambda_high = gr.Slider(
-                    label="DCW lambda high",
-                    minimum=-0.5, maximum=0.5, step=0.005, value=0.02,
-                    info="윤곽 링·미세 노이즈가 생기면 0 쪽으로 줄이세요.",
-                    elem_id="anima_guidance_dcw_lambda_high",
+                smc_enabled = gr.Checkbox(
+                    label="Enable SMC (legacy)",
+                    value=False,
+                    info=(
+                        "이전 버전의 저장값·API 인덱스용입니다. 켜면 위 preset이 "
+                        "Off여도 Custom lambda/k로 SMC가 활성화됩니다."
+                    ),
+                    elem_id="anima_guidance_smc_enable",
                 )
 
             gr.Markdown("#### DAVE — Anima diversity · block DC attenuation")
@@ -2458,12 +2493,14 @@ class AnimaSafePAG(scripts.Script):
             # toggles instead of entries in the cfg_mode radio.
             smc_enabled, cwm_enabled,
             # Appended in v0.20 so every older script-argument index remains
-            # stable across infotext/API/Live Workspace restoration.
+            # stable across infotext/API restoration.
             mod_enabled, mod_clip_model, mod_weight,
             mod_start_layer, mod_end_layer,
             mod_base_source, mod_base_prompt, mod_positive_prompt,
             mod_negative_source, mod_negative_prompt,
             mod_adapter_mode, mod_adapter_path,
+            # Appended after v0.20 to preserve all 56 older argument indexes.
+            smc_preset,
         ]
 
     def process_before_every_sampling(self, p, *args, **kwargs):
@@ -2479,6 +2516,7 @@ class AnimaSafePAG(scripts.Script):
         _CFG.update(
             smc_on=False, apg_on=False, cwm_on=False,
             mode="preserve", experimental_stack=False, steps=0,
+            smc_preset="Off", smc_resolved_preset="Off",
             fit_error=None, effective_scale=None,
             external_cfg_detected=False, warned=False,
         )
@@ -2582,6 +2620,11 @@ class AnimaSafePAG(scripts.Script):
             if "smc_enabled" in xyz
             else _as_bool(_arg(42, False), False)
         )
+        smc_preset = normalize_smc_preset(
+            xyz["smc_preset"]
+            if "smc_preset" in xyz
+            else _arg(56, "Off")
+        )
         cwm_enabled = (
             _as_bool(xyz["cwm_enabled"], _as_bool(_arg(43, False), False))
             if "cwm_enabled" in xyz
@@ -2608,9 +2651,15 @@ class AnimaSafePAG(scripts.Script):
             else _as_bool(_arg(44, False), False)
         )
         resolved_apg = apg_enabled or cfg_mode == "apg" or experimental_stack
-        resolved_smc = (
+        legacy_smc_requested = (
             smc_enabled or experimental_stack or cfg_mode in {"smc", "smc+cwm"}
         )
+        effective_smc_preset = (
+            smc_preset
+            if smc_preset != "Off"
+            else ("Custom" if legacy_smc_requested else "Off")
+        )
+        resolved_smc = effective_smc_preset != "Off"
         resolved_cwm = (
             cwm_enabled or experimental_stack or cfg_mode in {"cwm", "smc+cwm"}
         )
@@ -2690,6 +2739,9 @@ class AnimaSafePAG(scripts.Script):
             cwm_alpha_low = _xyz_num("cwm_alpha_low", float(_arg(24, 0.30)))
             cwm_alpha_high = _xyz_num("cwm_alpha_high", float(_arg(25, 0.15)))
             smc_lambda = _xyz_num("smc_lambda", float(_arg(26, 6.0)))
+            # Index 27 predates the appended preset selector. Keep its omitted
+            # API/infotext fallback at the historical 0.20; the new Custom UI
+            # still supplies its explicit upstream default of 0.10.
             smc_k = _xyz_num("smc_k", float(_arg(27, 0.20)))
             dcw_lambda_low = _xyz_num(
                 "dcw_lambda_low", float(_arg(29, 0.10))
@@ -2775,8 +2827,10 @@ class AnimaSafePAG(scripts.Script):
         seg_sigma = _finite_clamp(seg_sigma, 0.0, 10000.0, 100.0)
         cwm_alpha_low = _finite_clamp(cwm_alpha_low, -1.0, 1.0, 0.30)
         cwm_alpha_high = _finite_clamp(cwm_alpha_high, -1.0, 1.0, 0.15)
-        smc_lambda = _finite_clamp(smc_lambda, 0.0, 10.0, 6.0)
-        smc_k = _finite_clamp(smc_k, 0.0, 1.0, 0.20)
+        # Keep 0 valid for legacy/API neutral values even though the upstream
+        # Custom UI starts lambda at 0.5.
+        smc_lambda = _finite_clamp(smc_lambda, 0.0, 30.0, 6.0)
+        smc_k = _finite_clamp(smc_k, 0.0, 5.0, 0.20)
         dcw_lambda_low = _finite_clamp(dcw_lambda_low, -0.5, 0.5, 0.10)
         dcw_lambda_high = _finite_clamp(dcw_lambda_high, -0.5, 0.5, 0.02)
         dave_strength = _finite_clamp(dave_strength, 0.0, 1.0, 0.30)
@@ -2810,6 +2864,8 @@ class AnimaSafePAG(scripts.Script):
             experimental_stack=experimental_stack,
             alpha_low=cwm_alpha_low,
             alpha_high=cwm_alpha_high,
+            smc_preset=effective_smc_preset,
+            smc_resolved_preset=effective_smc_preset,
             smc_lambda=smc_lambda,
             smc_k=smc_k,
         )
@@ -2838,6 +2894,37 @@ class AnimaSafePAG(scripts.Script):
         sd_model = getattr(p, "sd_model", None)
         engine = type(sd_model).__name__ if sd_model is not None else "?"
         _STATE["engine"] = engine
+        (
+            _smc_requested_preset,
+            smc_resolved_preset,
+            smc_lambda,
+            smc_k,
+        ) = resolve_smc_preset(
+            effective_smc_preset,
+            sd_model,
+            custom_lambda=smc_lambda,
+            custom_k=smc_k,
+        )
+        smc_preset_label = (
+            "Legacy Custom"
+            if smc_preset == "Off" and legacy_smc_requested
+            else (
+                f"Auto→{smc_resolved_preset}"
+                if smc_preset == "Auto"
+                else smc_resolved_preset
+            )
+        )
+        _CFG.update(
+            smc_preset=effective_smc_preset,
+            smc_resolved_preset=smc_resolved_preset,
+            smc_lambda=smc_lambda,
+            smc_k=smc_k,
+        )
+        if smc_preset == "Auto":
+            _log(
+                f"SMC Auto detected {smc_resolved_preset}: "
+                f"lambda={smc_lambda:g}, k={smc_k:g}"
+            )
         forge_objects = getattr(sd_model, "forge_objects", None)
         unet = getattr(forge_objects, "unet", None)
         if unet is None:
@@ -3122,7 +3209,11 @@ class AnimaSafePAG(scripts.Script):
                 p.extra_generation_params["Anima CFG Orchestrator"] = (
                     "→".join(active)
                     + (f", alpha=({cwm_alpha_low},{cwm_alpha_high})" if cwm_on else "")
-                    + (f", smc=({smc_lambda},{smc_k})" if smc_on else "")
+                    + (
+                        f", smc={smc_preset_label}"
+                        f"({smc_lambda:g},{smc_k:g})"
+                        if smc_on else ""
+                    )
                 )
             if _DCW["on"]:
                 p.extra_generation_params["Anima DCW"] = (
@@ -3168,6 +3259,8 @@ class AnimaSafePAG(scripts.Script):
                 f"AdaptiveG={'on' if _ADG['on'] else 'off'} "
                 f"(skip_after={_ADG['start']} keep_every={_ADG['interval']}) "
                 f"CFGBase={_CFG['mode']} stack={_CFG['experimental_stack']} "
+                f"SMC={smc_preset_label}"
+                f"({smc_lambda:g},{smc_k:g}) "
                 f"DCW={_DCW['on']} DAVE={_DAVE['on']} CNS={_CNS['on']} "
                 f"Mod={'on' if _MOD['on'] else 'off'}"
                 + (
@@ -3208,6 +3301,8 @@ class AnimaSafePAG(scripts.Script):
             _STATE["requested_pert"],
             _STATE["requested_apg"],
             _STATE["requested_adg"],
+            _STATE["requested_smc"],
+            _STATE["requested_cwm"],
             _STATE["requested_cfg_mode"] != "preserve",
             _STATE["requested_cfg_stack"],
             _STATE["requested_dcw"],
@@ -3280,15 +3375,16 @@ class AnimaSafePAG(scripts.Script):
                     f"rel={_STATE['attn_last_rel_delta']:.3e})"
                 )
 
-            requested_mode = (
-                "SMC→APG→CWM"
-                if _STATE["requested_cfg_stack"]
-                else str(_STATE["requested_cfg_mode"]).upper()
-            )
-            cfg_requested = (
-                _STATE["requested_cfg_mode"] != "preserve"
-                or _STATE["requested_cfg_stack"]
-            )
+            requested_parts = [
+                name for name, requested in (
+                    ("SMC", _STATE["requested_smc"]),
+                    ("APG", _STATE["requested_apg"]),
+                    ("CWM", _STATE["requested_cwm"]),
+                )
+                if requested
+            ]
+            requested_mode = "→".join(requested_parts) or "PRESERVE"
+            cfg_requested = bool(requested_parts)
             cfg_verdict = (
                 "OFF"
                 if not cfg_requested
@@ -3352,8 +3448,13 @@ class AnimaSafePAG(scripts.Script):
         _APG["on"] = False
         _ADG["on"] = False
         _CFG.update(
+            smc_on=False,
+            apg_on=False,
+            cwm_on=False,
             mode="preserve",
             experimental_stack=False,
+            smc_preset="Off",
+            smc_resolved_preset="Off",
             steps=0,
             fit_error=None,
             effective_scale=None,
