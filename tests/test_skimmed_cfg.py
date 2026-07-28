@@ -242,6 +242,38 @@ class SkimmedCFGTests(unittest.TestCase):
         )
         self.assertEqual(unet.model_options["unrelated"], 7)
 
+    def test_logging_survives_a_legacy_console_encoding(self):
+        """A log line must never be able to abort a generation.
+
+        Several messages carry non-ASCII characters (em dash, check mark) and
+        _log is called from inside the post-CFG hook, so on a Windows console
+        using a legacy code page print() raising UnicodeEncodeError would kill
+        the sampler run. Reproduce that stdout and assert the hook still returns.
+        """
+        import io
+
+        class LegacyStream(io.TextIOBase):
+            encoding = "cp949"
+
+            def write(self, text):  # noqa: D401 - stream protocol
+                text.encode("cp949")  # raises on characters cp949 lacks
+                return len(text)
+
+        self.skim._SKIM.update(on=True, warned=False)
+        args = self._args(cond_scale=1.0)
+        original = sys.stdout
+        sys.stdout = LegacyStream()
+        try:
+            # Directly prove the message is unencodable on this stream...
+            with self.assertRaises(UnicodeEncodeError):
+                sys.stdout.write("em dash — here")
+            # ...yet the hook completes and preserves the incoming result.
+            out = self.skim._post_cfg(args)
+        finally:
+            sys.stdout = original
+
+        self.assertIs(out, args["denoised"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -108,7 +108,28 @@ except Exception:  # pragma: no cover
 
 
 def _log(msg: str) -> None:
-    print(f"[AnimaSafePAG] {msg}", file=sys.stderr)
+    """Print a diagnostic without ever being able to abort a generation.
+
+    Several of these messages carry non-ASCII characters, and on a Windows
+    console using a legacy code page (cp949, cp1252, ...) print raises
+    UnicodeEncodeError. _log runs inside the model wrapper and the post-CFG
+    hook — including from their except handlers — so an exception here would
+    replace a handled fallback with a hard sampler failure.
+    """
+    text = f"[AnimaSafePAG] {msg}"
+    try:
+        print(text, file=sys.stderr)
+    except UnicodeEncodeError:
+        try:
+            encoding = getattr(sys.stderr, "encoding", None) or "ascii"
+            print(
+                text.encode(encoding, "replace").decode(encoding, "replace"),
+                file=sys.stderr,
+            )
+        except Exception:
+            pass
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------

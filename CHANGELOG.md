@@ -3,6 +3,21 @@
 버전 태그는 GitHub Releases에도 발행됩니다. 아래는 요약이며, guidance/속도 기능의
 상세는 [docs/GUIDANCE.md](docs/GUIDANCE.md)를 참고하세요.
 
+## v0.21.2 — 레거시 콘솔 인코딩에서 로그가 생성을 죽이던 문제 + CI 연결
+
+- **로그 한 줄이 샘플링을 중단시킬 수 있던 문제 수정**: `_log`가 em-dash나 `✅` 같은
+  비-ASCII 문자를 그대로 `print`하는데, 레거시 코드 페이지(cp949, cp1252 등) 콘솔에서는
+  `UnicodeEncodeError`가 발생합니다. 이 함수는 `_post_cfg`와 model wrapper **안에서**,
+  심지어 그들의 `except` 핸들러에서도 호출되므로, 예외가 그대로 전파되어 처리된 폴백이
+  하드 실패로 바뀌거나 생성이 죽을 수 있었습니다. `anima_skimmed_cfg.py`와
+  `anima_safe_pag.py`의 `_log`가 인코딩 실패 시 ASCII 대체 표현으로 저하되고, 어떤 경우에도
+  예외를 밖으로 내보내지 않도록 했습니다. 여러 릴리즈 전부터 있던 선재 결함입니다.
+  `PYTHONIOENCODING=cp949`에서 전체 스위트가 통과하는 것과, cp949 stdout을 재현해 훅이
+  incoming 결과를 그대로 반환하는지 확인하는 회귀 테스트를 추가했습니다.
+- **CI에 프런트엔드 동작 테스트 연결**: v0.21.1에서 푸시 토큰의 `workflow` 스코프가 없어
+  빠졌던 `.github/workflows/ci.yml` 변경(`npm ci` + `npm test`)이 이제 포함됩니다.
+- **검증**: Python 149개(cp949 포함) + jsdom 6개 통과, `node --check` 전체 통과.
+
 ## v0.21.1 — 테마 라이트모드 수정 + 대비 실측 + 프런트엔드 동작 테스트
 
 v0.21.0에서 미뤄둔 접근성·테스트 항목을 처리한 릴리즈. 기능 변경은 없습니다.

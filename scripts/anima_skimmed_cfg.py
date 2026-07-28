@@ -31,6 +31,7 @@ hires passes and script reloads cannot stack stale copies.
 
 from __future__ import annotations
 
+import sys
 import traceback
 from functools import partial
 
@@ -66,7 +67,25 @@ _POST_CFG_OWNER = "sam-extra/anima-skimmed-cfg"
 
 
 def _log(message: str) -> None:
-    print(f"[AnimaSkimmedCFG] {message}")
+    """Print a diagnostic without ever being able to abort a generation.
+
+    Some of these messages carry non-ASCII characters, and on a Windows console
+    running a legacy code page (cp949, cp1252, ...) print raises
+    UnicodeEncodeError. _log is called from inside the post-CFG hook, so an
+    exception here would propagate into the sampler and kill the run for the
+    sake of a log line. Degrade to an ASCII-safe rendering instead.
+    """
+    text = f"[AnimaSkimmedCFG] {message}"
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        try:
+            encoding = getattr(sys.stdout, "encoding", None) or "ascii"
+            print(text.encode(encoding, "replace").decode(encoding, "replace"))
+        except Exception:
+            pass
+    except Exception:
+        pass
 
 
 def _as_bool(value, default: bool) -> bool:
